@@ -1,0 +1,615 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GridParseError, parseDotaGridJson, parseDotaGridValue } from "./dota-json/parse";
+import { serializeDotaGrid, toDotaFile } from "./dota-json/serialize";
+import { validateDotaGridFile, type ValidationIssue } from "./dota-json/validate";
+import {
+  activeConfig,
+  addConfig,
+  clearActiveConfig,
+  duplicateActiveConfig,
+  mergeConfigInto,
+  removeActiveConfig,
+  removeImportedArt,
+  renameActiveConfig,
+  replaceGenerated,
+  setActiveConfig,
+  updateActiveCategories,
+  withoutCaptions,
+} from "./model/document";
+import { createId } from "./model/ids";
+import {
+  createLayer,
+  flattenLayers,
+  layerCategories,
+  libraryFromConfigs,
+  type Layer,
+  type LibraryEntry,
+} from "./compose/layers";
+import { ComposeCanvas } from "./ui/ComposeCanvas";
+import { ComposeSidebar } from "./ui/ComposeSidebar";
+import { ComposeResult } from "./ui/ComposeResult";
+import { IssuesDialog, type IssuesReport } from "./ui/IssuesDialog";
+import { loadSession, saveSession } from "./app/persistence";
+import {
+  DEFAULT_EXPORT_FILE_NAME,
+  DEFAULT_PLACEMENT,
+  DOTA_JSON_VERSION,
+  GRID_SIZE,
+  defaultConversionSettings,
+  inferCategoryKind,
+  type ConversionSettings,
+  type GridDocument,
+  type Placement,
+  type SymbolSettings,
+} from "./model/types";
+import { HEROES } from "./heroes/heroes";
+import { placementRect } from "./image/placement";
+import { loadImageSource, rasterizeSource, type ImageSource } from "./image/source";
+import { createConversionClient, type ConversionClient } from "./image/conversionClient";
+import type { ConversionOutput } from "./image/convert";
+import { stampsFromPoints } from "./layout/stamps";
+import { SYMBOL_PRESETS } from "./symbols/symbolSet";
+import { useDocumentHistory } from "./editor/useDocumentHistory";
+import { deleteCategories, nudgeCategories } from "./editor/operations";
+import {
+  DEFAULT_SHAPE_SETTINGS,
+  frameOutline,
+  outlinePoints,
+  selectionBounds,
+  shapeStamps,
+  type ShapeSettings,
+} from "./editor/shapes";
+import { Toolbar, type Tab } from "./ui/Toolbar";
+import { ConverterSidebar } from "./ui/ConverterSidebar";
+import { PhotoPane } from "./ui/PhotoPane";
+import { GridPreviewPane } from "./ui/GridPreviewPane";
+import { EditorCanvas, type Tool } from "./ui/EditorCanvas";
+import { EditorSidebar } from "./ui/EditorSidebar";
+import { Inspector } from "./ui/Inspector";
+import exampleGrid from "./dota-json/fixtures/hero_grid_config.json";
+
+const TOOL_KEYS: Record<string, Tool> = {
+  KeyV: "select",
+  KeyB: "stamp",
+  KeyG: "shape",
+  KeyE: "erase",
+  KeyT: "tray",
+  KeyH: "pan",
+};
+
+function downloadText(filename: string, text: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const AUTOSAVE_DELAY_MS = 600;
+const ERASE_RADIUS_RANGE: [number, number] = [2, 60];
+const BRUSH_STEP_RANGE: [number, number] = [2, 40];
+const SHAPE_STEP_RANGE: [number, number] = [3, 40];
+
+function clamp(v: number, [min, max]: [number, number]): number {
+  return Math.min(max, Math.max(min, v));
+}
+
+function errorIssues(e: unknown): ValidationIssue[] {
+  if (e instanceof GridParseError) return e.issues;
+  return [{ level: "error", message: e instanceof Error ? e.message : String(e) }];
+}
+
+function isTyping(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
+}
+
+export function App() {
+  const [restored] = useState(loadSession);
+  const { doc, canUndo, canRedo, commit, commitCategories, undo, redo } = useDocumentHistory(restored?.doc);
+  const config = activeConfig(doc);
+
+  const [tab, setTab] = useState<Tab>("convert");
+  const [source, setSource] = useState<ImageSource | null>(null);
+  const [placement, setPlacement] = useState<Placement>(DEFAULT_PLACEMENT);
+  const [settings, setSettings] = useState<ConversionSettings>(() => restored?.settings ?? defaultConversionSettings());
+  const [symbols, setSymbols] = useState<SymbolSettings>(() => restored?.symbols ?? SYMBOL_PRESETS[0].settings);
+  const [conversion, setConversion] = useState<ConversionOutput | null>(null);
+  const [showMask, setShowMask] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [tool, setTool] = useState<Tool>("select");
+  const [glyph, setGlyph] = useState(".");
+  const [eraseRadius, setEraseRadius] = useState(8);
+  const [brushStep, setBrushStep] = useState(5);
+  const [shape, setShape] = useState<ShapeSettings>(DEFAULT_SHAPE_SETTINGS);
+  const [status, setStatus] = useState(() =>
+    restored ? "Восстановлена прошлая работа (фото нужно загрузить заново)" : "",
+  );
+  const [report, setReport] = useState<IssuesReport | null>(null);
+  const [library, setLibrary] = useState<LibraryEntry[]>(() => restored?.library ?? []);
+  const [layers, setLayers] = useState<Layer[]>(() => restored?.layers ?? []);
+  const [layerId, setLayerId] = useState<string | null>(null);
+  const [composeName, setComposeName] = useState(() => restored?.composeName ?? "Сборка");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!saveSession({ doc, settings, symbols, library, layers, composeName })) {
+        setStatus("Автосохранение не удалось: в браузере закончилось место");
+      }
+    }, AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [doc, settings, symbols, library, layers, composeName]);
+
+  const clientRef = useRef<ConversionClient | null>(null);
+  const rasterCanvas = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const client = createConversionClient(setConversion);
+    clientRef.current = client;
+    return () => {
+      client.dispose();
+      clientRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!source) return;
+    rasterCanvas.current ??= document.createElement("canvas");
+    const rect = placementRect(source.width, source.height, GRID_SIZE, placement);
+    const image = rasterizeSource(source, rect, placement, rasterCanvas.current);
+    clientRef.current?.request({ image, rect, rotation: placement.rotation, settings });
+  }, [source, placement, settings]);
+
+  useEffect(() => {
+    if (!conversion) return;
+    const stamps = stampsFromPoints(conversion.points, symbols);
+    commit((d) => replaceGenerated(d, stamps), "generate");
+  }, [conversion, symbols, commit]);
+
+  const loadDocument = useCallback(
+    (next: GridDocument, message: string) => {
+      commit(() => next);
+      setSource(null);
+      setConversion(null);
+      setSelected(new Set());
+      setStatus(message);
+    },
+    [commit],
+  );
+
+  const onUpload = async (file: File) => {
+    try {
+      const next = await loadImageSource(file);
+      setSource(next);
+      setPlacement(DEFAULT_PLACEMENT);
+      setConversion(null);
+      setSelected(new Set());
+      commit(removeImportedArt);
+      setStatus(`Изображение ${file.name}: ${next.width}×${next.height}`);
+    } catch {
+      setStatus(`Не удалось открыть изображение ${file.name}`);
+    }
+  };
+
+  const showFailure = (title: string, e: unknown) => {
+    setStatus(title);
+    setReport({ title, issues: errorIssues(e) });
+  };
+
+  const onOpenJson = async (file: File) => {
+    try {
+      const next = parseDotaGridJson(await file.text());
+      const count = next.configs.reduce((n, c) => n + c.categories.length, 0);
+      loadDocument(next, `Открыт ${file.name}: сеток ${next.configs.length}, категорий ${count}`);
+    } catch (e) {
+      showFailure(`Не удалось открыть ${file.name}`, e);
+    }
+  };
+
+  const onExample = () => {
+    loadDocument(withoutCaptions(parseDotaGridValue(exampleGrid)), "Загружен пример Kaneki");
+  };
+
+  /** Switching grids ends the photo session, so generated art never lands in another grid. */
+  const switchConfig = (update: (d: GridDocument) => GridDocument) => {
+    commit(update);
+    setSource(null);
+    setConversion(null);
+    setSelected(new Set());
+  };
+
+  const onClear = () => {
+    commit(clearActiveConfig);
+    setSource(null);
+    setConversion(null);
+    setSelected(new Set());
+    setStatus("Сетка очищена");
+  };
+
+  /** Validates the exact text being written; errors block the download. */
+  const saveDocument = (target: GridDocument, message: string): boolean => {
+    const text = serializeDotaGrid(target);
+    const issues = validateDotaGridFile(JSON.parse(text));
+    if (issues.some((i) => i.level === "error")) {
+      setStatus("Файл не сохранён: в нём есть ошибки");
+      setReport({ title: "Файл не сохранён", issues });
+      return false;
+    }
+    downloadText(DEFAULT_EXPORT_FILE_NAME, text);
+    const warnings = issues.filter((i) => i.level === "warning").length;
+    setStatus(warnings ? `${message} · предупреждений: ${warnings}` : message);
+    return true;
+  };
+
+  const onExport = () => {
+    saveDocument(doc, `Сохранён ${DEFAULT_EXPORT_FILE_NAME}: сеток ${doc.configs.length}`);
+  };
+
+  const onMergeInto = async (file: File) => {
+    let target: GridDocument;
+    try {
+      target = parseDotaGridJson(await file.text());
+    } catch (e) {
+      showFailure(`Не удалось прочитать ${file.name}`, e);
+      return;
+    }
+    const { doc: merged, replaced } = mergeConfigInto(target, config);
+    saveDocument(
+      merged,
+      `Сетка «${config.name}» ${replaced ? "заменена" : "добавлена"} в ${file.name}; ` +
+        `сеток в файле: ${merged.configs.length}. Скачан ${DEFAULT_EXPORT_FILE_NAME}`,
+    );
+  };
+
+  const liveIssues = useMemo(
+    () => validateDotaGridFile(toDotaFile(doc)).filter((i) => i.level !== "info"),
+    [doc],
+  );
+
+  const onAddLibraryFile = async (file: File) => {
+    try {
+      const parsed = parseDotaGridJson(await file.text());
+      setLibrary((lib) => [...lib, ...libraryFromConfigs(file.name, parsed.configs)]);
+      setStatus(`Загружен ${file.name}: сеток ${parsed.configs.length}`);
+    } catch (e) {
+      showFailure(`Не удалось открыть ${file.name}`, e);
+    }
+  };
+
+  const onTakeFromEditor = () => {
+    setLibrary((lib) => [
+      ...lib,
+      { id: createId("lib"), fileName: "редактор", configName: config.name, categories: config.categories },
+    ]);
+  };
+
+  const onAddLayer = (entry: LibraryEntry) => {
+    const layer = createLayer(entry);
+    setLayers((ls) => [...ls, layer]);
+    setLayerId(layer.id);
+  };
+
+  const onLayerChange = useCallback((layer: Layer) => {
+    setLayers((ls) => ls.map((l) => (l.id === layer.id ? layer : l)));
+  }, []);
+
+  const onMoveLayer = (id: string, dir: -1 | 1) => {
+    setLayers((ls) => {
+      const i = ls.findIndex((l) => l.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= ls.length) return ls;
+      const next = [...ls];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  };
+
+  const onRemoveLayer = useCallback((id: string) => {
+    setLayers((ls) => ls.filter((l) => l.id !== id));
+    setLayerId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  const composePreview = useMemo(
+    () => ({
+      id: "compose",
+      name: composeName,
+      categories: layers.filter((l) => l.visible).flatMap(layerCategories),
+    }),
+    [layers, composeName],
+  );
+  const composed = useMemo(() => flattenLayers(layers), [layers]);
+  const composeIssues = useMemo(
+    () =>
+      validateDotaGridFile(
+        toDotaFile({
+          version: DOTA_JSON_VERSION,
+          activeConfigId: "",
+          configs: [{ id: "", name: composeName, categories: composed }],
+        }),
+      ).filter((i) => i.level !== "info"),
+    [composed, composeName],
+  );
+
+  const onComposeToEditor = (asNew: boolean) => {
+    const cats = flattenLayers(layers);
+    commit((d) => {
+      const base = asNew ? addConfig(d, composeName) : renameActiveConfig(d, composeName);
+      return updateActiveCategories(base, () => cats);
+    });
+    setSource(null);
+    setConversion(null);
+    setSelected(new Set());
+    setTab("edit");
+    setStatus(asNew ? `Сборка добавлена как новая сетка «${composeName}»` : "Сборка заменила текущую сетку");
+  };
+
+  const onComposeSave = () => {
+    const cfgId = createId("cfg");
+    saveDocument(
+      {
+        version: DOTA_JSON_VERSION,
+        activeConfigId: cfgId,
+        configs: [{ id: cfgId, name: composeName, categories: flattenLayers(layers) }],
+      },
+      `Сборка «${composeName}» сохранена в ${DEFAULT_EXPORT_FILE_NAME}`,
+    );
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.code === "KeyZ") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod && e.code === "KeyY") {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      const arrows: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      if (tab === "compose") {
+        const layer = layers.find((l) => l.id === layerId);
+        if (!layer) return;
+        const dir = arrows[e.code];
+        if (dir) {
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 1;
+          onLayerChange({ ...layer, x: layer.x + dir[0] * step, y: layer.y + dir[1] * step });
+        } else if (e.code === "Delete") {
+          e.preventDefault();
+          onRemoveLayer(layer.id);
+        } else if (e.code === "Escape") {
+          setLayerId(null);
+        }
+        return;
+      }
+      if (tab !== "edit") return;
+      if (mod && e.code === "KeyA") {
+        e.preventDefault();
+        setSelected(new Set(config.categories.map((c) => c.id)));
+        return;
+      }
+      if (e.code === "Delete" || e.code === "Backspace") {
+        if (selected.size === 0) return;
+        e.preventDefault();
+        commitCategories((cats) => deleteCategories(cats, selected));
+        setSelected(new Set());
+        return;
+      }
+      if (e.code === "Escape") {
+        setSelected(new Set());
+        return;
+      }
+      const dir = arrows[e.code];
+      if (dir && selected.size > 0) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        commitCategories((cats) => nudgeCategories(cats, selected, dir[0] * step, dir[1] * step), "nudge");
+        return;
+      }
+      if (!mod && TOOL_KEYS[e.code]) setTool(TOOL_KEYS[e.code]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab, config.categories, selected, commitCategories, undo, redo, layers, layerId, onLayerChange, onRemoveLayer]);
+
+  const onFrameSelection = (padding: number) => {
+    const bounds = selectionBounds(config.categories, selected);
+    if (!bounds) return;
+    const stamps = shapeStamps(outlinePoints(frameOutline(shape.kind, bounds, padding), shape, glyph));
+    if (!stamps.length) return;
+    commitCategories((cats) => [...cats, ...stamps]);
+    setSelected(new Set(stamps.map((s) => s.id)));
+    setStatus(`Рамка: ${stamps.length} символов`);
+  };
+
+  const stats = useMemo(() => {
+    let generated = 0;
+    let manual = 0;
+    let trays = 0;
+    const heroes = new Set<number>();
+    for (const c of config.categories) {
+      c.heroIds.forEach((id) => heroes.add(id));
+      if (inferCategoryKind(c) === "tray") trays++;
+      else if (c.origin === "generated") generated++;
+      else manual++;
+    }
+    return { generated, manual, trays, hidden: HEROES.length - heroes.size };
+  }, [config.categories]);
+
+  return (
+    <div className={`app ${tab !== "convert" ? "with-inspector" : ""}`}>
+      <Toolbar
+        tab={tab}
+        onTab={setTab}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={undo}
+        onRedo={redo}
+        onOpenJson={onOpenJson}
+        onExport={onExport}
+        onMergeInto={onMergeInto}
+        onExample={onExample}
+        onClear={onClear}
+        doc={doc}
+        onSelectConfig={(id) => switchConfig((d) => setActiveConfig(d, id))}
+        onRenameConfig={(name) => commit((d) => renameActiveConfig(d, name), "rename-config")}
+        onAddConfig={() => switchConfig((d) => addConfig(d))}
+        onDuplicateConfig={() => switchConfig(duplicateActiveConfig)}
+        onRemoveConfig={() => switchConfig(removeActiveConfig)}
+      />
+
+      <aside className="sidebar">
+        {tab === "compose" ? (
+          <ComposeSidebar
+            library={library}
+            onAddFile={onAddLibraryFile}
+            onTakeFromEditor={onTakeFromEditor}
+            onAddLayer={onAddLayer}
+            onRemoveEntry={(id) => setLibrary((lib) => lib.filter((e) => e.id !== id))}
+            layers={layers}
+            selectedId={layerId}
+            onSelect={setLayerId}
+            onLayerChange={onLayerChange}
+            onMoveLayer={onMoveLayer}
+            onRemoveLayer={onRemoveLayer}
+          />
+        ) : tab === "convert" ? (
+          <ConverterSidebar
+            hasImage={!!source}
+            onUpload={onUpload}
+            placement={placement}
+            onPlacement={setPlacement}
+            settings={settings}
+            onSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))}
+            symbols={symbols}
+            onSymbols={setSymbols}
+            showMask={showMask}
+            onShowMask={setShowMask}
+          />
+        ) : (
+          <EditorSidebar
+            tool={tool}
+            onTool={setTool}
+            glyph={glyph}
+            onGlyph={setGlyph}
+            eraseRadius={eraseRadius}
+            onEraseRadius={setEraseRadius}
+            eraseRadiusRange={ERASE_RADIUS_RANGE}
+            brushStep={brushStep}
+            onBrushStep={setBrushStep}
+            brushStepRange={BRUSH_STEP_RANGE}
+            shape={shape}
+            onShape={(patch) => setShape((s) => ({ ...s, ...patch }))}
+            shapeStepRange={SHAPE_STEP_RANGE}
+            selectedCount={selected.size}
+            onFrameSelection={onFrameSelection}
+          />
+        )}
+      </aside>
+
+      <main className="content">
+        {tab === "convert" ? (
+          <div className="panes">
+            <section className="pane">
+              <header>Фото</header>
+              <PhotoPane
+                source={source}
+                placement={placement}
+                onPlacementChange={setPlacement}
+                mask={conversion?.mask ?? null}
+                showMask={showMask}
+              />
+            </section>
+            <section className="pane">
+              <header>
+                Превью из символов · {GRID_SIZE.width}×{GRID_SIZE.height}
+              </header>
+              <GridPreviewPane config={config} />
+            </section>
+          </div>
+        ) : tab === "compose" ? (
+          <ComposeCanvas
+            layers={layers}
+            preview={composePreview}
+            selectedId={layerId}
+            onSelect={setLayerId}
+            onLayerChange={onLayerChange}
+          />
+        ) : (
+          <EditorCanvas
+            config={config}
+            selected={selected}
+            onSelect={setSelected}
+            tool={tool}
+            glyph={glyph}
+            eraseRadius={eraseRadius}
+            paintSpacing={brushStep}
+            shape={shape}
+            onToolSizeStep={(dir) => {
+              if (tool === "stamp") setBrushStep((s) => clamp(s + dir, BRUSH_STEP_RANGE));
+              else if (tool === "shape") setShape((s) => ({ ...s, step: clamp(s.step + dir, SHAPE_STEP_RANGE) }));
+              else setEraseRadius((r) => clamp(r + dir * (r >= 20 ? 2 : 1), ERASE_RADIUS_RANGE));
+            }}
+            commitCategories={commitCategories}
+          />
+        )}
+      </main>
+
+      {tab === "edit" && (
+        <aside className="inspector">
+          <Inspector
+            config={config}
+            selected={selected}
+            onSelect={setSelected}
+            commitCategories={commitCategories}
+          />
+        </aside>
+      )}
+      {tab === "compose" && (
+        <aside className="inspector">
+          <ComposeResult
+            categories={composed}
+            issues={composeIssues}
+            configName={composeName}
+            onConfigName={setComposeName}
+            onReplaceCurrent={() => onComposeToEditor(false)}
+            onAddAsNew={() => onComposeToEditor(true)}
+            onSave={onComposeSave}
+          />
+        </aside>
+      )}
+      {report && <IssuesDialog report={report} onClose={() => setReport(null)} />}
+
+      <footer className="statusbar">
+        <span>
+          Символов: {stats.generated + stats.manual} (авто {stats.generated}, вручную/из файла {stats.manual})
+        </span>
+        <span>Блоков героев: {stats.trays}</span>
+        <span>
+          Скрыто героев: {stats.hidden} из {HEROES.length}
+        </span>
+        {liveIssues.length > 0 && (
+          <button
+            type="button"
+            className={`status-issues ${liveIssues.some((i) => i.level === "error") ? "error" : ""}`}
+            onClick={() => setReport({ title: "Проверка файла", issues: liveIssues })}
+          >
+            ⚠ Проверка: {liveIssues.length}
+          </button>
+        )}
+        <span className="status-message">{status}</span>
+      </footer>
+    </div>
+  );
+}
