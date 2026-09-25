@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
+  DOTA_CARD,
   fitTraySize,
-  HERO_CELL,
+  heroMetrics,
+  setHeroIconScale,
   snapTrayRect,
   trayCells,
   trayColumns,
+  trayRows,
   traySize,
   traySlots,
 } from "./trayLayout";
@@ -14,15 +17,30 @@ function tray(patch: Partial<Category>): Category {
   return { id: "t", name: "", x: 0, y: 0, width: 100, height: 100, heroIds: [], origin: "manual", ...patch };
 }
 
+beforeEach(() => {
+  setHeroIconScale(1);
+});
+
 describe("tray layout", () => {
-  it("a ~200-wide Kaneki box is three landscape icons, not two tall ones", () => {
-    expect(trayColumns(197.391312)).toBe(3);
-    expect(trayColumns(200.869568)).toBe(3);
-    expect(traySize(3, 1).width).toBeCloseTo(202, 5);
+  it("sizes a 2×2 block to Dota's 51×83 cards so the row does not squish", () => {
+    const box = traySize(2, 2);
+    expect(box).toEqual({ width: 8 + 51 * 2, height: 20 + 8 + 83 * 2 });
+    expect(trayColumns(box.width)).toBe(2);
+    expect(trayRows(box.height, false)).toBe(2);
   });
 
-  it("snaps a freehand drag to whole icon cells", () => {
-    const snapped = snapTrayRect({ x: 10, y: 20, width: 140, height: 90 });
+  it("the previous short 2×2 (~136×82) only had room for squished cards", () => {
+    expect(trayColumns(136)).toBe(2);
+    expect(trayRows(82, false)).toBe(1);
+  });
+
+  it("a Kaneki-width box holds three real cards", () => {
+    expect(trayColumns(197.391312)).toBe(3);
+    expect(trayColumns(200.869568)).toBe(3);
+  });
+
+  it("snaps a freehand drag to whole cards", () => {
+    const snapped = snapTrayRect({ x: 10, y: 20, width: 120, height: 200 });
     expect(traySlots({ ...snapped, name: "", heroIds: [] })).toEqual({ cols: 2, rows: 2 });
     expect(snapped.width).toBe(traySize(2, 2).width);
     expect(snapped.height).toBe(traySize(2, 2).height);
@@ -34,25 +52,28 @@ describe("tray layout", () => {
     expect(fitted).toEqual(empty);
   });
 
-  it("adds a title bar without changing the icon grid", () => {
-    const plain = traySize(3, 2, false);
-    const titled = traySize(3, 2, true);
-    expect(titled.width).toBe(plain.width);
-    expect(titled.height).toBeGreaterThan(plain.height);
-    expect(traySlots({ width: titled.width, height: titled.height, name: "BAN", heroIds: [] })).toEqual({
-      cols: 3,
-      rows: 2,
-    });
-  });
-
-  it("cells are 16:9 landscape and sit inside the box", () => {
+  it("cells are the tall in-game card and sit inside the box", () => {
+    const m = heroMetrics();
     const size = traySize(2, 2);
     const cells = trayCells(tray({ ...size, x: 40, y: 30, heroIds: [1] }));
     expect(cells).toHaveLength(4);
-    expect(cells[0]).toMatchObject({ x: 44, y: 34, width: HERO_CELL.width, height: HERO_CELL.height });
-    expect(HERO_CELL.width / HERO_CELL.height).toBeCloseTo(16 / 9, 1);
+    expect(cells[0]).toMatchObject({
+      x: 40 + m.pad,
+      y: 30 + m.title + m.pad,
+      width: DOTA_CARD.width,
+      height: DOTA_CARD.height,
+    });
     const last = cells[3];
     expect(last.x + last.width).toBeLessThanOrEqual(40 + size.width + 1e-6);
     expect(last.y + last.height).toBeLessThanOrEqual(30 + size.height + 1e-6);
+  });
+
+  it("icon scale enlarges a new tray without going below the Dota card", () => {
+    expect(setHeroIconScale(0.5)).toBe(1);
+    setHeroIconScale(1.2);
+    const scaled = traySize(2, 1);
+    setHeroIconScale(1);
+    expect(scaled.width).toBeCloseTo(traySize(2, 1).width * 1.2, 5);
+    expect(scaled.height).toBeGreaterThan(traySize(2, 1).height);
   });
 });

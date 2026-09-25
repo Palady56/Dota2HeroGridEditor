@@ -139,9 +139,15 @@ export const HEROES: Hero[] = [
 export const HERO_BY_ID = new Map(HEROES.map((h) => [h.id, h]));
 
 const PORTRAIT_BASE = "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/";
+/** Classic vertical card art, already framed like the in-game portrait. */
+const CARD_PORTRAIT_BASE = "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/heroes/";
 
 export function heroPortraitUrl(hero: Hero): string {
   return `${PORTRAIT_BASE}${hero.key}.png`;
+}
+
+export function heroCardPortraitUrl(hero: Hero): string {
+  return `${CARD_PORTRAIT_BASE}${hero.key}_vert.jpg`;
 }
 
 export function unusedHeroCount(assigned: number[], rosterSize: number): number {

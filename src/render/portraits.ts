@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { heroPortraitUrl, type Hero } from "../heroes/heroes";
+import { heroCardPortraitUrl, heroPortraitUrl, type Hero } from "../heroes/heroes";
 
-type Entry = { image: HTMLImageElement; ready: boolean; failed: boolean };
+type Entry = { image: HTMLImageElement; ready: boolean; failed: boolean; triedFallback: boolean };
 
 const cache = new Map<number, Entry>();
 const listeners = new Set<() => void>();
@@ -25,15 +25,20 @@ export function getPortrait(hero: Hero): HTMLImageElement | null {
   let entry = cache.get(hero.id);
   if (!entry) {
     const image = new Image();
-    const created: Entry = { image, ready: false, failed: false };
+    const created: Entry = { image, ready: false, failed: false, triedFallback: false };
     image.onload = () => {
       created.ready = true;
       notify();
     };
     image.onerror = () => {
+      if (!created.triedFallback) {
+        created.triedFallback = true;
+        image.src = heroPortraitUrl(hero);
+        return;
+      }
       created.failed = true;
     };
-    image.src = heroPortraitUrl(hero);
+    image.src = heroCardPortraitUrl(hero);
     cache.set(hero.id, created);
     entry = created;
   }

@@ -68,7 +68,7 @@ import { GridPreviewPane } from "./ui/GridPreviewPane";
 import { EditorCanvas, type Tool } from "./ui/EditorCanvas";
 import { EditorSidebar } from "./ui/EditorSidebar";
 import { Inspector } from "./ui/Inspector";
-import { TRAY_COLS_RANGE } from "./render/trayLayout";
+import { TRAY_COLS_RANGE, getHeroIconScale, setHeroIconScale } from "./render/trayLayout";
 import { useTheme } from "./ui/theme";
 import { IconAlert } from "./ui/icons";
 import exampleGrid from "./dota-json/fixtures/hero_grid_config.json";
@@ -130,6 +130,14 @@ export function App() {
   const [brushStep, setBrushStep] = useState(5);
   const [shape, setShape] = useState<ShapeSettings>(DEFAULT_SHAPE_SETTINGS);
   const [trayCols, setTrayCols] = useState(2);
+  const [heroIconScale, setHeroIconScaleState] = useState(() => {
+    try {
+      const n = Number(localStorage.getItem("dota-hero-grid-art:hero-icon-scale"));
+      return Number.isFinite(n) && n > 0 ? setHeroIconScale(n) : getHeroIconScale();
+    } catch {
+      return getHeroIconScale();
+    }
+  });
   const [status, setStatus] = useState(() =>
     restored ? "Восстановлена прошлая работа (фото нужно загрузить заново)" : "",
   );
@@ -536,6 +544,16 @@ export function App() {
             trayCols={trayCols}
             onTrayCols={setTrayCols}
             trayColsRange={TRAY_COLS_RANGE}
+            heroIconScale={heroIconScale}
+            onHeroIconScale={(scale) => {
+              const next = setHeroIconScale(scale);
+              setHeroIconScaleState(next);
+              try {
+                localStorage.setItem("dota-hero-grid-art:hero-icon-scale", String(next));
+              } catch {
+                // Private mode or full storage: the scale just won't be remembered.
+              }
+            }}
           />
         )}
       </aside>
@@ -591,6 +609,7 @@ export function App() {
             paintSpacing={brushStep}
             shape={shape}
             trayCols={trayCols}
+            heroIconScale={heroIconScale}
             onToolSizeStep={(dir) => {
               if (tool === "stamp") setBrushStep((s) => clamp(s + dir, BRUSH_STEP_RANGE));
               else if (tool === "shape") setShape((s) => ({ ...s, step: clamp(s.step + dir, SHAPE_STEP_RANGE) }));

@@ -18,16 +18,24 @@ const COLORS = {
 };
 
 /**
- * Draw the landscape portrait into a 16:9 cell. The CDN image is already 16:9,
- * so this is a 1:1 fit — not a tall crop that made faces look zoomed-in.
+ * Fill the vertical card the way Dota does. Card art is already a portrait;
+ * a wide banner (fallback for heroes without one) is cropped to the same slot.
  */
-function drawCover(ctx: CanvasRenderingContext2D, image: HTMLImageElement, cell: Rect): void {
-  const scale = Math.max(cell.width / image.naturalWidth, cell.height / image.naturalHeight);
+function drawPortrait(ctx: CanvasRenderingContext2D, image: HTMLImageElement, cell: Rect): void {
+  const iw = image.naturalWidth || image.width;
+  const ih = image.naturalHeight || image.height;
+  if (iw <= 0 || ih <= 0 || cell.width <= 0 || cell.height <= 0) return;
+  const scale = Math.max(cell.width / iw, cell.height / ih);
   const sw = cell.width / scale;
   const sh = cell.height / scale;
-  const sx = (image.naturalWidth - sw) / 2;
-  const sy = (image.naturalHeight - sh) / 2;
+  const sx = Math.max(0, (iw - sw) / 2);
+  const sy = Math.max(0, (ih - sh) / 2);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(cell.x, cell.y, cell.width, cell.height);
+  ctx.clip();
   ctx.drawImage(image, sx, sy, sw, sh, cell.x, cell.y, cell.width, cell.height);
+  ctx.restore();
 }
 
 function drawTray(
@@ -59,7 +67,7 @@ function drawTray(
     const hero = HERO_BY_ID.get(id);
     const portrait = hero ? getPortrait(hero) : null;
     if (portrait) {
-      drawCover(ctx, portrait, cell);
+      drawPortrait(ctx, portrait, cell);
       return;
     }
     ctx.fillStyle = `hsl(${(id * 47) % 360} 30% 26%)`;

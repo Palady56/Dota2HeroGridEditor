@@ -29,6 +29,7 @@ type Props = {
   paintSpacing: number;
   shape: ShapeSettings;
   trayCols: number;
+  heroIconScale: number;
   /** Ctrl + wheel: +1 grows, -1 shrinks the current tool (eraser radius, brush, shape step or tray columns). */
   onToolSizeStep: (direction: 1 | -1) => void;
   commitCategories: CommitCategories;
@@ -167,7 +168,7 @@ export function EditorCanvas(props: Props) {
 
   useEffect(() => {
     schedule();
-  }, [props.config, props.selected, props.tool, props.glyph, props.eraseRadius, props.paintSpacing, props.shape, props.trayCols, portraitVersion, schedule]);
+  }, [props.config, props.selected, props.tool, props.glyph, props.eraseRadius, props.paintSpacing, props.shape, props.trayCols, props.heroIconScale, portraitVersion, schedule]);
 
   const applyView = useCallback(
     (next: ViewTransform) => {

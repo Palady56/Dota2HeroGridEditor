@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { IconBrush, IconEraser, IconGrid, IconMove, IconPointer, IconShapes } from "./icons";
 import type { Tool } from "./EditorCanvas";
 import type { ShapeKind, ShapeSettings } from "../editor/shapes";
+import { HERO_ICON_SCALE_RANGE } from "../render/trayLayout";
 import { Section, Slider } from "./controls";
 
 type Props = {
@@ -24,6 +25,8 @@ type Props = {
   trayCols: number;
   onTrayCols: (cols: number) => void;
   trayColsRange: [number, number];
+  heroIconScale: number;
+  onHeroIconScale: (scale: number) => void;
 };
 
 const SHAPES: { id: ShapeKind; icon: string; label: string }[] = [
@@ -258,8 +261,18 @@ export function EditorSidebar(props: Props) {
             );
           })}
         </div>
+        <Slider
+          label="Размер иконки"
+          value={props.heroIconScale}
+          min={HERO_ICON_SCALE_RANGE[0]}
+          max={HERO_ICON_SCALE_RANGE[1]}
+          step={0.05}
+          format={(v) => `${Math.round(v * 100)}%`}
+          hint="100% — карточка Dota 51×83. Чуть выше даёт воздух в рамке; меньше 100% в игре сожмёт ряд."
+          onChange={props.onHeroIconScale}
+        />
         <p className="hint">
-          Клик ставит блок {props.trayCols}×2. Тяните мышью — рамка прыгает по целым иконкам и обнимает их без лишнего поля. Потом добавьте героев справа.
+          Клик ставит блок {props.trayCols}×2 того же размера, что портреты в игре. Старые короткие рамки в Dota сжимают иконки — поставьте блок заново или нажмите «Подогнать к иконкам».
         </p>
       </Section>
 

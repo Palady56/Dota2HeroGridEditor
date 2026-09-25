@@ -3,7 +3,7 @@ import { markManual } from "../model/document";
 import { GRID_SIZE, inferCategoryKind, type Category, type Rect } from "../model/types";
 import { stampAt } from "../layout/stamps";
 import { GLYPH_ANCHOR } from "../render/glyph";
-import { fitTraySize, resizeTrayGrid, snapTrayRect, trayColumns, trayNamed, trayRows, traySize } from "../render/trayLayout";
+import { fitTraySize, resizeTrayGrid, snapTrayRect, trayColumns, trayRows, traySize } from "../render/trayLayout";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -125,11 +125,10 @@ export function addHeroes(cats: Category[], trayId: string, heroIds: number[]): 
     if (c.id !== trayId) return c;
     const merged = [...c.heroIds];
     for (const id of heroIds) if (!merged.includes(id)) merged.push(id);
-    const named = trayNamed(c);
     const cols = trayColumns(c.width);
     const need = Math.max(1, Math.ceil(merged.length / cols));
-    const rows = Math.max(trayRows(c.height, named), need);
-    const size = traySize(cols, rows, named);
+    const rows = Math.max(trayRows(c.height, false), need);
+    const size = traySize(cols, rows);
     return markManual({ ...c, heroIds: merged, width: round2(size.width), height: round2(size.height) });
   });
 }
