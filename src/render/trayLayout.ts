@@ -76,7 +76,7 @@ export function fitTraySize(tray: Pick<Category, "width" | "height" | "name" | "
   return traySize(cols, rows, false, m);
 }
 
-export function resizeTrayGrid(tray: Pick<Category, "name">, cols: number, rows: number, m = heroMetrics()): Size {
+export function resizeTrayGrid(_tray: Pick<Category, "name">, cols: number, rows: number, m = heroMetrics()): Size {
   return traySize(cols, rows, false, m);
 }
 
