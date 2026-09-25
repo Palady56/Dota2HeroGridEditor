@@ -60,8 +60,29 @@ export type Rect = { x: number; y: number; width: number; height: number };
 
 export type ConversionMode = "edges" | "lines";
 
+/**
+ * Filling areas with symbols: "shadows" / "lights" put one symbol wherever the
+ * photo is darker / lighter than the threshold, "tone" picks a symbol from a
+ * ramp by brightness (ASCII halftone).
+ */
+export type FillMode = "none" | "shadows" | "lights" | "tone";
+
 export type ConversionSettings = {
   mode: ConversionMode;
+  /** Place symbols along contours / lines. */
+  outline: boolean;
+  fill: FillMode;
+  /** 0–255 brightness boundary for "shadows" and "lights". */
+  fillThreshold: number;
+  /** Horizontal distance between fill symbols; rows are FILL_ROW_RATIO times further apart. */
+  fillSpacing: number;
+  fillGlyph: string;
+  /** "tone": symbols from dark to bright; a space means "leave empty". */
+  fillRamp: string;
+  /** Also fill the grid around the photo (a background). */
+  fillOutside: boolean;
+  /** Empty space kept around contour symbols, grid px. */
+  fillGap: number;
   brightness: number;
   contrast: number;
   invert: boolean;
@@ -87,6 +108,12 @@ export type Placement = {
   flipX: boolean;
   flipY: boolean;
 };
+
+/** Dota symbols are about 8×14 px, so fill rows sit further apart than columns. */
+export const FILL_ROW_RATIO = 1.6;
+
+/** A fill position (glyph centre) and the photo brightness there, 0–255; -1 outside the photo. */
+export type FillCell = { x: number; y: number; tone: number };
 
 export type SamplePoint = {
   x: number;
@@ -129,6 +156,14 @@ export function inferCategoryKind(category: Category): CategoryKind {
 export function defaultConversionSettings(): ConversionSettings {
   return {
     mode: "edges",
+    outline: true,
+    fill: "none",
+    fillThreshold: 128,
+    fillSpacing: 8,
+    fillGlyph: ".",
+    fillRamp: " .:-=+*#",
+    fillOutside: false,
+    fillGap: 4,
     brightness: 0,
     contrast: 1,
     invert: false,

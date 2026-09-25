@@ -55,8 +55,7 @@ export function ComposeCanvas(props: Props) {
     const p = propsRef.current;
     const v = view.current;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#0b0908";
-    ctx.fillRect(0, 0, w, h);
+    ctx.clearRect(0, 0, w, h);
     drawGrid(ctx, p.preview, v, NO_SELECTION);
 
     const layer = selectedLayer();

@@ -9,15 +9,18 @@ export type ViewTransform = { scale: number; tx: number; ty: number };
 export const IDENTITY_VIEW: ViewTransform = { scale: 1, tx: 0, ty: 0 };
 
 const COLORS = {
-  background: "#15100c",
-  border: "#6b3a26",
+  background: "#0e1115",
+  border: "rgba(226, 84, 58, 0.55)",
   glyph: "#ece7dd",
   selected: "#ffc857",
   trayBorder: "rgba(236, 231, 221, 0.3)",
   heroText: "#f4efe6",
 };
 
-/** Fill `cell` with the image, cropping the overflow like CSS object-fit: cover. */
+/**
+ * Draw the landscape portrait into a 16:9 cell. The CDN image is already 16:9,
+ * so this is a 1:1 fit — not a tall crop that made faces look zoomed-in.
+ */
 function drawCover(ctx: CanvasRenderingContext2D, image: HTMLImageElement, cell: Rect): void {
   const scale = Math.max(cell.width / image.naturalWidth, cell.height / image.naturalHeight);
   const sw = cell.width / scale;
@@ -45,6 +48,14 @@ function drawTray(
   ctx.textBaseline = "top";
   trayCells(tray).forEach((cell, i) => {
     const id = tray.heroIds[i];
+    if (id === undefined) {
+      ctx.fillStyle = "rgba(236, 231, 221, 0.04)";
+      ctx.fillRect(cell.x, cell.y, cell.width, cell.height);
+      ctx.strokeStyle = "rgba(236, 231, 221, 0.14)";
+      ctx.lineWidth = 1 / scale;
+      ctx.strokeRect(cell.x + 0.5 / scale, cell.y + 0.5 / scale, cell.width - 1 / scale, cell.height - 1 / scale);
+      return;
+    }
     const hero = HERO_BY_ID.get(id);
     const portrait = hero ? getPortrait(hero) : null;
     if (portrait) {

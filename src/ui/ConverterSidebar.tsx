@@ -1,4 +1,4 @@
-import type { ConversionSettings, Placement, SymbolSettings } from "../model/types";
+import type { ConversionSettings, FillMode, Placement, SymbolSettings } from "../model/types";
 import { DEFAULT_PLACEMENT } from "../model/types";
 import { findPresetId, SYMBOL_PRESETS } from "../symbols/symbolSet";
 import { Checkbox, FileButton, Section, Slider } from "./controls";
@@ -23,6 +23,13 @@ const GLYPH_FIELDS: { key: keyof Omit<SymbolSettings, "minStraightness" | "minRu
   { key: "diagDown", label: "Диагональ ↘" },
   { key: "diagUp", label: "Диагональ ↗" },
   { key: "fallback", label: "Изгибы" },
+];
+
+const FILL_MODES: { id: FillMode; label: string; hint: string }[] = [
+  { id: "none", label: "Нет", hint: "Только контур" },
+  { id: "shadows", label: "Тени", hint: "Символ ставится там, где фото темнее порога" },
+  { id: "lights", label: "Свет", hint: "Символ ставится там, где фото светлее порога — например, фон" },
+  { id: "tone", label: "Полутона", hint: "ASCII-арт: символ выбирается по яркости" },
 ];
 
 export function ConverterSidebar(props: Props) {
@@ -132,6 +139,84 @@ export function ConverterSidebar(props: Props) {
           onChange={(minLineLength) => onSettings({ minLineLength })}
         />
         <Checkbox label="Показать найденные линии на фото" checked={props.showMask} onChange={props.onShowMask} />
+        <Checkbox label="Рисовать контур символами" checked={settings.outline} onChange={(outline) => onSettings({ outline })} />
+      </Section>
+
+      <Section title="Заливка">
+        <div className="segmented">
+          {FILL_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className={settings.fill === m.id ? "active" : ""}
+              title={m.hint}
+              onClick={() => onSettings({ fill: m.id })}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        {settings.fill !== "none" && (
+          <>
+            {settings.fill === "tone" ? (
+              <label className="field compact">
+                <span>Символы от тёмного к светлому (пробел — пусто)</span>
+                <input
+                  className="glyph-input ramp-input"
+                  value={settings.fillRamp}
+                  onChange={(e) => onSettings({ fillRamp: e.target.value })}
+                />
+              </label>
+            ) : (
+              <>
+                <label className="field compact">
+                  <span>Символ заливки</span>
+                  <input
+                    className="glyph-input"
+                    value={settings.fillGlyph}
+                    onChange={(e) => onSettings({ fillGlyph: e.target.value })}
+                  />
+                </label>
+                <Slider
+                  label={settings.fill === "shadows" ? "Что считать тёмным" : "Что считать светлым"}
+                  value={settings.fillThreshold}
+                  min={5}
+                  max={250}
+                  step={1}
+                  hint={settings.fill === "shadows" ? "Больше — заливается больше области" : "Меньше — заливается больше области"}
+                  onChange={(fillThreshold) => onSettings({ fillThreshold })}
+                />
+              </>
+            )}
+            <Slider
+              label="Шаг заливки"
+              value={settings.fillSpacing}
+              min={4}
+              max={30}
+              step={0.5}
+              format={(v) => `${v} px`}
+              hint="Расстояние между символами заливки. Меньше — плотнее и больше категорий"
+              onChange={(fillSpacing) => onSettings({ fillSpacing })}
+            />
+            {settings.outline && (
+              <Slider
+                label="Отступ от контура"
+                value={settings.fillGap}
+                min={0}
+                max={16}
+                step={1}
+                format={(v) => `${v} px`}
+                hint="Пустое место вокруг линий контура, чтобы он читался"
+                onChange={(fillGap) => onSettings({ fillGap })}
+              />
+            )}
+            <Checkbox
+              label="Заполнить всю сетку вокруг фото"
+              checked={settings.fillOutside}
+              onChange={(fillOutside) => onSettings({ fillOutside })}
+            />
+          </>
+        )}
       </Section>
 
       <Section title="Символы">

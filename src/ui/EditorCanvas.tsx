@@ -12,8 +12,10 @@ import {
   moveCategories,
   type Point,
 } from "../editor/operations";
+import { snapTrayRect, trayCells, traySlots, traySize } from "../render/trayLayout";
 import { dragOutline, outlinePoints, shapeStamps, type ShapePoint, type ShapeSettings } from "../editor/shapes";
 import type { CommitCategories } from "../editor/useDocumentHistory";
+import { IconFit, IconMinus, IconPlus } from "./icons";
 
 export type Tool = "select" | "stamp" | "shape" | "erase" | "tray" | "pan";
 
@@ -26,7 +28,8 @@ type Props = {
   eraseRadius: number;
   paintSpacing: number;
   shape: ShapeSettings;
-  /** Ctrl + wheel: +1 grows, -1 shrinks the current tool (eraser radius, brush or shape step). */
+  trayCols: number;
+  /** Ctrl + wheel: +1 grows, -1 shrinks the current tool (eraser radius, brush, shape step or tray columns). */
   onToolSizeStep: (direction: 1 | -1) => void;
   commitCategories: CommitCategories;
 };
@@ -42,7 +45,7 @@ type Drag =
 
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 24;
-const MIN_TRAY_SIDE = 20;
+const CLICK_PX = 4;
 
 function normRect(a: Point, b: Point): Rect {
   return {
@@ -93,8 +96,7 @@ export function EditorCanvas(props: Props) {
     const p = propsRef.current;
     const v = view.current;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#0b0908";
-    ctx.fillRect(0, 0, w, h);
+    ctx.clearRect(0, 0, w, h);
     drawGrid(ctx, p.config, v, p.selected);
 
     const o = overlay.current;
@@ -110,6 +112,17 @@ export function EditorCanvas(props: Props) {
     if (o.tray) {
       ctx.strokeStyle = "#7fd18b";
       ctx.strokeRect(o.tray.x, o.tray.y, o.tray.width, o.tray.height);
+      const slots = traySlots({ ...o.tray, name: "", heroIds: [] });
+      ctx.fillStyle = "rgba(127, 209, 139, 0.08)";
+      ctx.strokeStyle = "rgba(127, 209, 139, 0.35)";
+      for (const cell of trayCells({ id: "", name: "", heroIds: [], origin: "manual", ...o.tray })) {
+        ctx.fillRect(cell.x, cell.y, cell.width, cell.height);
+        ctx.strokeRect(cell.x, cell.y, cell.width, cell.height);
+      }
+      ctx.fillStyle = "#7fd18b";
+      ctx.font = `${12 / v.scale}px Inter, sans-serif`;
+      ctx.textBaseline = "bottom";
+      ctx.fillText(`${slots.cols}×${slots.rows}`, o.tray.x, o.tray.y - 4 / v.scale);
     }
     if (o.shape) {
       ctx.globalAlpha = 0.75;
@@ -154,7 +167,7 @@ export function EditorCanvas(props: Props) {
 
   useEffect(() => {
     schedule();
-  }, [props.config, props.selected, props.tool, props.glyph, props.eraseRadius, props.paintSpacing, props.shape, portraitVersion, schedule]);
+  }, [props.config, props.selected, props.tool, props.glyph, props.eraseRadius, props.paintSpacing, props.shape, props.trayCols, portraitVersion, schedule]);
 
   const applyView = useCallback(
     (next: ViewTransform) => {
@@ -313,6 +326,15 @@ export function EditorCanvas(props: Props) {
     }
   };
 
+  const snapTrayFromDrag = (a: Point, b: Point, defaultCols: number): Rect => {
+    const raw = normRect(a, b);
+    if (Math.hypot(raw.width, raw.height) * view.current.scale < CLICK_PX) {
+      const size = traySize(defaultCols, 2);
+      return { x: a.x, y: a.y, ...size };
+    }
+    return snapTrayRect(raw);
+  };
+
   const shapePreview = (a: Point, b: Point, e: { shiftKey: boolean; altKey: boolean }): ShapePoint[] => {
     const p = propsRef.current;
     const outline = dragOutline(p.shape.kind, a, b, { square: e.shiftKey, fromCenter: e.altKey });
@@ -343,7 +365,7 @@ export function EditorCanvas(props: Props) {
           overlay.current.box = normRect(d.start, g);
           break;
         case "tray":
-          overlay.current.tray = normRect(d.start, g);
+          overlay.current.tray = snapTrayFromDrag(d.start, g, p.trayCols);
           break;
         case "shape":
           overlay.current.shape = shapePreview(d.start, g, e);
@@ -371,8 +393,9 @@ export function EditorCanvas(props: Props) {
       if (d.additive) for (const id of p.selected) ids.add(id);
       p.onSelect(ids);
     }
-    if (d?.kind === "tray" && o.tray && o.tray.width >= MIN_TRAY_SIDE && o.tray.height >= MIN_TRAY_SIDE) {
-      const tray = createTray(o.tray);
+    if (d?.kind === "tray") {
+      const raw = o.tray ?? snapTrayFromDrag(d.start, d.start, p.trayCols);
+      const tray = createTray(raw);
       p.commitCategories((cats) => [...cats, tray]);
       p.onSelect(new Set([tray.id]));
     }
@@ -420,19 +443,22 @@ export function EditorCanvas(props: Props) {
             ? `Шаг кисти: ${props.paintSpacing} px`
             : props.tool === "shape"
               ? `Шаг фигуры: ${props.shape.step} px`
-              : `Радиус ластика: ${props.eraseRadius} px`}
+              : props.tool === "tray"
+                ? `Ширина блока: ${props.trayCols} ${props.trayCols === 1 ? "герой" : props.trayCols < 5 ? "героя" : "героев"}`
+                : `Радиус ластика: ${props.eraseRadius} px`}
         </div>
       )}
       <div className="zoom-controls">
-        <button type="button" className="btn" onClick={() => zoomAt(size.current.w / 2, size.current.h / 2, 1 / 1.25)}>
-          −
+        <button type="button" className="btn icon ghost" title="Отдалить" onClick={() => zoomAt(size.current.w / 2, size.current.h / 2, 1 / 1.25)}>
+          <IconMinus />
         </button>
         <span className="zoom-value">{Math.round(zoom * 100)}%</span>
-        <button type="button" className="btn" onClick={() => zoomAt(size.current.w / 2, size.current.h / 2, 1.25)}>
-          +
+        <button type="button" className="btn icon ghost" title="Приблизить" onClick={() => zoomAt(size.current.w / 2, size.current.h / 2, 1.25)}>
+          <IconPlus />
         </button>
-        <button type="button" className="btn" onClick={fit}>
-          Вписать
+        <button type="button" className="btn ghost" title="Показать всю сетку" onClick={fit}>
+          <IconFit />
+          <span>Вписать</span>
         </button>
       </div>
     </div>

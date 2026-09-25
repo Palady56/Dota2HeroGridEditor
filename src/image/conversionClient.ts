@@ -1,5 +1,6 @@
 import type { ConversionOutput } from "./convert";
 import {
+  unpackFill,
   unpackPoints,
   type ConversionRequest,
   type ConversionResponse,
@@ -12,7 +13,7 @@ export type ConversionClient = {
 
 /** One conversion at a time; while busy only the newest request is kept. */
 export function createConversionClient(
-  onResult: (out: ConversionOutput) => void,
+  onResult: (out: ConversionOutput, id: number | undefined) => void,
 ): ConversionClient {
   const worker = new Worker(new URL("./convert.worker.ts", import.meta.url), {
     type: "module",
@@ -27,8 +28,8 @@ export function createConversionClient(
 
   worker.onmessage = (event: MessageEvent<ConversionResponse>) => {
     busy = false;
-    const { packed, mask, width, height } = event.data;
-    onResult({ points: unpackPoints(packed), mask, width, height });
+    const { packed, packedFill, mask, width, height, id } = event.data;
+    onResult({ points: unpackPoints(packed), fill: unpackFill(packedFill), mask, width, height }, id);
     if (pending) {
       const next = pending;
       pending = null;

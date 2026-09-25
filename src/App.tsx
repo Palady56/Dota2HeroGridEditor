@@ -47,7 +47,9 @@ import { placementRect } from "./image/placement";
 import { loadImageSource, rasterizeSource, type ImageSource } from "./image/source";
 import { createConversionClient, type ConversionClient } from "./image/conversionClient";
 import type { ConversionOutput } from "./image/convert";
-import { stampsFromPoints } from "./layout/stamps";
+import { stampsFromConversion } from "./layout/stamps";
+import { applyStyle } from "./symbols/artStyles";
+import { StyleGallery } from "./ui/StyleGallery";
 import { SYMBOL_PRESETS } from "./symbols/symbolSet";
 import { useDocumentHistory } from "./editor/useDocumentHistory";
 import { deleteCategories, nudgeCategories } from "./editor/operations";
@@ -66,6 +68,9 @@ import { GridPreviewPane } from "./ui/GridPreviewPane";
 import { EditorCanvas, type Tool } from "./ui/EditorCanvas";
 import { EditorSidebar } from "./ui/EditorSidebar";
 import { Inspector } from "./ui/Inspector";
+import { TRAY_COLS_RANGE } from "./render/trayLayout";
+import { useTheme } from "./ui/theme";
+import { IconAlert } from "./ui/icons";
 import exampleGrid from "./dota-json/fixtures/hero_grid_config.json";
 
 const TOOL_KEYS: Record<string, Tool> = {
@@ -107,6 +112,7 @@ function isTyping(target: EventTarget | null): boolean {
 
 export function App() {
   const [restored] = useState(loadSession);
+  const [theme, toggleTheme] = useTheme();
   const { doc, canUndo, canRedo, commit, commitCategories, undo, redo } = useDocumentHistory(restored?.doc);
   const config = activeConfig(doc);
 
@@ -115,7 +121,7 @@ export function App() {
   const [placement, setPlacement] = useState<Placement>(DEFAULT_PLACEMENT);
   const [settings, setSettings] = useState<ConversionSettings>(() => restored?.settings ?? defaultConversionSettings());
   const [symbols, setSymbols] = useState<SymbolSettings>(() => restored?.symbols ?? SYMBOL_PRESETS[0].settings);
-  const [conversion, setConversion] = useState<ConversionOutput | null>(null);
+  const [conversion, setConversion] = useState<(ConversionOutput & { settings: ConversionSettings }) | null>(null);
   const [showMask, setShowMask] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [tool, setTool] = useState<Tool>("select");
@@ -123,6 +129,7 @@ export function App() {
   const [eraseRadius, setEraseRadius] = useState(8);
   const [brushStep, setBrushStep] = useState(5);
   const [shape, setShape] = useState<ShapeSettings>(DEFAULT_SHAPE_SETTINGS);
+  const [trayCols, setTrayCols] = useState(2);
   const [status, setStatus] = useState(() =>
     restored ? "Восстановлена прошлая работа (фото нужно загрузить заново)" : "",
   );
@@ -144,8 +151,16 @@ export function App() {
   const clientRef = useRef<ConversionClient | null>(null);
   const rasterCanvas = useRef<HTMLCanvasElement | null>(null);
 
+  const requestSeq = useRef(0);
+  const requestSettings = useRef(new Map<number, ConversionSettings>());
+
   useEffect(() => {
-    const client = createConversionClient(setConversion);
+    const client = createConversionClient((out, id) => {
+      const used = id === undefined ? undefined : requestSettings.current.get(id);
+      if (!used) return;
+      for (const key of requestSettings.current.keys()) if (key <= id!) requestSettings.current.delete(key);
+      setConversion({ ...out, settings: used });
+    });
     clientRef.current = client;
     return () => {
       client.dispose();
@@ -158,12 +173,14 @@ export function App() {
     rasterCanvas.current ??= document.createElement("canvas");
     const rect = placementRect(source.width, source.height, GRID_SIZE, placement);
     const image = rasterizeSource(source, rect, placement, rasterCanvas.current);
-    clientRef.current?.request({ image, rect, rotation: placement.rotation, settings });
+    const id = ++requestSeq.current;
+    requestSettings.current.set(id, settings);
+    clientRef.current?.request({ image, rect, rotation: placement.rotation, settings, id });
   }, [source, placement, settings]);
 
   useEffect(() => {
     if (!conversion) return;
-    const stamps = stampsFromPoints(conversion.points, symbols);
+    const stamps = stampsFromConversion(conversion, conversion.settings, symbols);
     commit((d) => replaceGenerated(d, stamps), "generate");
   }, [conversion, symbols, commit]);
 
@@ -467,6 +484,8 @@ export function App() {
         onAddConfig={() => switchConfig((d) => addConfig(d))}
         onDuplicateConfig={() => switchConfig(duplicateActiveConfig)}
         onRemoveConfig={() => switchConfig(removeActiveConfig)}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       <aside className="sidebar">
@@ -514,6 +533,9 @@ export function App() {
             shapeStepRange={SHAPE_STEP_RANGE}
             selectedCount={selected.size}
             onFrameSelection={onFrameSelection}
+            trayCols={trayCols}
+            onTrayCols={setTrayCols}
+            trayColsRange={TRAY_COLS_RANGE}
           />
         )}
       </aside>
@@ -521,6 +543,18 @@ export function App() {
       <main className="content">
         {tab === "convert" ? (
           <div className="panes">
+            <StyleGallery
+              source={source}
+              placement={placement}
+              settings={settings}
+              symbols={symbols}
+              onApply={(style) => {
+                const next = applyStyle(style, settings);
+                setSettings(next.settings);
+                setSymbols(next.symbols);
+                setStatus(`Стиль: ${style.name}`);
+              }}
+            />
             <section className="pane">
               <header>Фото</header>
               <PhotoPane
@@ -556,9 +590,11 @@ export function App() {
             eraseRadius={eraseRadius}
             paintSpacing={brushStep}
             shape={shape}
+            trayCols={trayCols}
             onToolSizeStep={(dir) => {
               if (tool === "stamp") setBrushStep((s) => clamp(s + dir, BRUSH_STEP_RANGE));
               else if (tool === "shape") setShape((s) => ({ ...s, step: clamp(s.step + dir, SHAPE_STEP_RANGE) }));
+              else if (tool === "tray") setTrayCols((n) => clamp(n + dir, TRAY_COLS_RANGE));
               else setEraseRadius((r) => clamp(r + dir * (r >= 20 ? 2 : 1), ERASE_RADIUS_RANGE));
             }}
             commitCategories={commitCategories}
@@ -592,12 +628,17 @@ export function App() {
       {report && <IssuesDialog report={report} onClose={() => setReport(null)} />}
 
       <footer className="statusbar">
-        <span>
-          Символов: {stats.generated + stats.manual} (авто {stats.generated}, вручную/из файла {stats.manual})
+        <span className="stat" title={`Авто ${stats.generated}, вручную или из файла ${stats.manual}`}>
+          Символов <b>{stats.generated + stats.manual}</b>
+          <span className="stat-sub">
+            авто {stats.generated} · вручную {stats.manual}
+          </span>
         </span>
-        <span>Блоков героев: {stats.trays}</span>
-        <span>
-          Скрыто героев: {stats.hidden} из {HEROES.length}
+        <span className="stat">
+          Блоков героев <b>{stats.trays}</b>
+        </span>
+        <span className="stat">
+          Скрыто героев <b>{stats.hidden}</b> / {HEROES.length}
         </span>
         {liveIssues.length > 0 && (
           <button
@@ -605,7 +646,8 @@ export function App() {
             className={`status-issues ${liveIssues.some((i) => i.level === "error") ? "error" : ""}`}
             onClick={() => setReport({ title: "Проверка файла", issues: liveIssues })}
           >
-            ⚠ Проверка: {liveIssues.length}
+            <IconAlert size={13} />
+            Проверка: {liveIssues.length}
           </button>
         )}
         <span className="status-message">{status}</span>

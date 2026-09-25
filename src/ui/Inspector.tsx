@@ -11,11 +11,14 @@ function HeroThumb({ id }: { id: number }) {
 import {
   addHeroes,
   deleteCategories,
+  fitTray,
   moveHero,
   removeHero,
   replaceGlyph,
+  setTrayGrid,
   updateCategory,
 } from "../editor/operations";
+import { TRAY_COLS_RANGE, traySize, traySlots } from "../render/trayLayout";
 import type { CommitCategories } from "../editor/useDocumentHistory";
 import { HeroPicker } from "./HeroPicker";
 import { NumberField, Section } from "./controls";
@@ -179,14 +182,61 @@ function SingleCategory({
         <p className="hint">{ORIGIN_LABEL[c.origin]}</p>
         <label className="field">
           <span>{kind === "tray" ? "Название блока" : "Символ / текст"}</span>
-          <input value={c.name} onChange={(e) => patch({ name: e.target.value }, "name")} />
+          <input
+            value={c.name}
+            onChange={(e) => {
+              const name = e.target.value;
+              if (kind !== "tray") {
+                patch({ name }, "name");
+                return;
+              }
+              const { cols, rows } = traySlots(c);
+              const size = traySize(cols, rows, name.length > 0);
+              patch({ name, height: size.height }, "name");
+            }}
+          />
         </label>
         <div className="grid-2">
           <NumberField label="X" value={c.x} step={0.5} onChange={(x) => patch({ x }, "x")} />
           <NumberField label="Y" value={c.y} step={0.5} onChange={(y) => patch({ y }, "y")} />
-          <NumberField label="Ширина" value={c.width} min={1} onChange={(width) => patch({ width: Math.max(1, width) }, "w")} />
-          <NumberField label="Высота" value={c.height} min={1} onChange={(height) => patch({ height: Math.max(1, height) }, "h")} />
+          {kind === "tray" ? (
+            <>
+              <NumberField
+                label="Колонки"
+                value={traySlots(c).cols}
+                min={TRAY_COLS_RANGE[0]}
+                step={1}
+                onChange={(cols) =>
+                  commitCategories((cats) => setTrayGrid(cats, c.id, cols, traySlots(c).rows), `edit-${c.id}-cols`)
+                }
+              />
+              <NumberField
+                label="Ряды"
+                value={traySlots(c).rows}
+                min={1}
+                step={1}
+                onChange={(rows) =>
+                  commitCategories((cats) => setTrayGrid(cats, c.id, traySlots(c).cols, rows), `edit-${c.id}-rows`)
+                }
+              />
+            </>
+          ) : (
+            <>
+              <NumberField label="Ширина" value={c.width} min={1} onChange={(width) => patch({ width: Math.max(1, width) }, "w")} />
+              <NumberField label="Высота" value={c.height} min={1} onChange={(height) => patch({ height: Math.max(1, height) }, "h")} />
+            </>
+          )}
         </div>
+        {kind === "tray" && (
+          <button
+            type="button"
+            className="btn wide"
+            title="Сжать рамку вплотную к иконкам: ширина по колонкам, высота по числу героев"
+            onClick={() => commitCategories((cats) => fitTray(cats, c.id), `fit-${c.id}`)}
+          >
+            Подогнать к иконкам
+          </button>
+        )}
         <button type="button" className="btn danger wide" onClick={onDelete}>
           Удалить
         </button>

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 type SliderProps = {
   label: string;
@@ -12,6 +12,7 @@ type SliderProps = {
 };
 
 export function Slider({ label, value, min, max, step, onChange, format, hint }: SliderProps) {
+  const fill = max > min ? ((value - min) / (max - min)) * 100 : 0;
   return (
     <label className="field" title={hint}>
       <span className="field-head">
@@ -24,6 +25,7 @@ export function Slider({ label, value, min, max, step, onChange, format, hint }:
         max={max}
         step={step}
         value={value}
+        style={{ "--fill": `${fill}%` } as CSSProperties}
         onChange={(e) => onChange(Number(e.target.value))}
       />
     </label>
@@ -89,8 +91,10 @@ export function FileButton({
   className = "btn",
   title,
   multiple = false,
+  icon,
 }: {
   label: string;
+  icon?: ReactNode;
   accept: string;
   /** Called once per chosen file. */
   onFile: (file: File) => void;
@@ -100,7 +104,8 @@ export function FileButton({
 }) {
   return (
     <label className={className} title={title}>
-      {label}
+      {icon}
+      <span className="btn-label">{label}</span>
       <input
         type="file"
         accept={accept}

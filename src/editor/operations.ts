@@ -3,6 +3,7 @@ import { markManual } from "../model/document";
 import { GRID_SIZE, inferCategoryKind, type Category, type Rect } from "../model/types";
 import { stampAt } from "../layout/stamps";
 import { GLYPH_ANCHOR } from "../render/glyph";
+import { fitTraySize, resizeTrayGrid, snapTrayRect, trayColumns, trayNamed, trayRows, traySize } from "../render/trayLayout";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -66,16 +67,35 @@ export function eraseNear(cats: Category[], px: number, py: number, radius: numb
 }
 
 export function createTray(rect: Rect): Category {
+  const snapped = snapTrayRect(rect);
   return {
     id: createId("cat"),
     name: "",
-    x: round2(rect.x),
-    y: round2(rect.y),
-    width: round2(rect.width),
-    height: round2(rect.height),
+    x: round2(snapped.x),
+    y: round2(snapped.y),
+    width: round2(snapped.width),
+    height: round2(snapped.height),
     heroIds: [],
     origin: "manual",
   };
+}
+
+/** Shrink or grow the box so the frame sits on the icons. */
+export function fitTray(cats: Category[], id: string): Category[] {
+  return cats.map((c) => {
+    if (c.id !== id || inferCategoryKind(c) !== "tray") return c;
+    const size = fitTraySize(c);
+    if (size.width === c.width && size.height === c.height) return c;
+    return markManual({ ...c, width: round2(size.width), height: round2(size.height) });
+  });
+}
+
+export function setTrayGrid(cats: Category[], id: string, cols: number, rows: number): Category[] {
+  return cats.map((c) => {
+    if (c.id !== id) return c;
+    const size = resizeTrayGrid(c, cols, rows);
+    return markManual({ ...c, width: round2(size.width), height: round2(size.height) });
+  });
 }
 
 export function updateCategory(
@@ -105,7 +125,12 @@ export function addHeroes(cats: Category[], trayId: string, heroIds: number[]): 
     if (c.id !== trayId) return c;
     const merged = [...c.heroIds];
     for (const id of heroIds) if (!merged.includes(id)) merged.push(id);
-    return markManual({ ...c, heroIds: merged });
+    const named = trayNamed(c);
+    const cols = trayColumns(c.width);
+    const need = Math.max(1, Math.ceil(merged.length / cols));
+    const rows = Math.max(trayRows(c.height, named), need);
+    const size = traySize(cols, rows, named);
+    return markManual({ ...c, heroIds: merged, width: round2(size.width), height: round2(size.height) });
   });
 }
 

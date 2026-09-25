@@ -58,7 +58,7 @@ export function ComposeResult(props: Props) {
         </button>
         <p className="hint">
           После отправки в редактор можно дорисовать детали и сохранить или добавить в свой файл Dota кнопкой
-          «Добавить в мой файл Dota…».
+          «В мой файл Dota…» в шапке.
         </p>
       </Section>
     </>

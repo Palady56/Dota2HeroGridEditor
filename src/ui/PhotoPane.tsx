@@ -72,7 +72,7 @@ export function PhotoPane({ source, placement, onPlacementChange, mask, showMask
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    ctx.fillStyle = "#0d0a08";
+    ctx.fillStyle = "#0e1115";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     if (source && frame && handle) {
       const r = placementRect(source.width, source.height, GRID_SIZE, placement);
@@ -104,7 +104,7 @@ export function PhotoPane({ source, placement, onPlacementChange, mask, showMask
       ctx.textAlign = "left";
       ctx.textBaseline = "alphabetic";
     } else {
-      ctx.fillStyle = "#7d7064";
+      ctx.fillStyle = "#6b7480";
       ctx.font = "20px 'Segoe UI', sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("Загрузите изображение слева", canvas.width / 2, canvas.height / 2);

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { IconBrush, IconEraser, IconGrid, IconMove, IconPointer, IconShapes } from "./icons";
 import type { Tool } from "./EditorCanvas";
 import type { ShapeKind, ShapeSettings } from "../editor/shapes";
 import { Section, Slider } from "./controls";
@@ -20,6 +21,9 @@ type Props = {
   /** Number of selected categories a frame can go around. */
   selectedCount: number;
   onFrameSelection: (padding: number) => void;
+  trayCols: number;
+  onTrayCols: (cols: number) => void;
+  trayColsRange: [number, number];
 };
 
 const SHAPES: { id: ShapeKind; icon: string; label: string }[] = [
@@ -46,13 +50,13 @@ const SHAPE_HINTS: Record<ShapeKind, string> = {
   ellipse: "Shift — круг. Alt — от центра",
 };
 
-const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
-  { id: "select", label: "Выбор", key: "V", hint: "Клик — выбрать, перетащить — двигать, рамка — выбрать несколько, Shift — добавить" },
-  { id: "stamp", label: "Кисть", key: "B", hint: "Ставит выбранный символ; можно вести мышью" },
-  { id: "shape", label: "Фигура", key: "G", hint: "Линия, прямоугольник, ромб, треугольник или овал из символов" },
-  { id: "erase", label: "Ластик", key: "E", hint: "Стирает символы под кругом (блоки героев не трогает)" },
-  { id: "tray", label: "Блок героев", key: "T", hint: "Нарисуйте прямоугольник, затем добавьте героев справа" },
-  { id: "pan", label: "Рука", key: "H", hint: "Двигать холст" },
+const TOOLS: { id: Tool; label: string; key: string; hint: string; icon: ReactNode }[] = [
+  { id: "select", label: "Выбор", key: "V", icon: <IconPointer />, hint: "Клик — выбрать, перетащить — двигать, рамка — выбрать несколько, Shift — добавить" },
+  { id: "stamp", label: "Кисть", key: "B", icon: <IconBrush />, hint: "Ставит выбранный символ; можно вести мышью" },
+  { id: "shape", label: "Фигура", key: "G", icon: <IconShapes />, hint: "Линия, прямоугольник, ромб, треугольник или овал из символов" },
+  { id: "erase", label: "Ластик", key: "E", icon: <IconEraser />, hint: "Стирает символы под кругом (блоки героев не трогает)" },
+  { id: "tray", label: "Блок героев", key: "T", icon: <IconGrid />, hint: "Клик — блок на выбранную ширину и 2 ряда. Тяните — целое число иконок. Ctrl + колесо — число колонок" },
+  { id: "pan", label: "Рука", key: "H", icon: <IconMove />, hint: "Двигать холст" },
 ];
 
 type PaletteGroup = { title: string; hint?: string; glyphs: string[] };
@@ -91,7 +95,8 @@ export function EditorSidebar(props: Props) {
               title={t.hint}
               onClick={() => props.onTool(t.id)}
             >
-              <span>{t.label}</span>
+              {t.icon}
+              <span className="tool-label">{t.label}</span>
               <kbd>{t.key}</kbd>
             </button>
           ))}
@@ -232,6 +237,32 @@ export function EditorSidebar(props: Props) {
         </div>
       </Section>
 
+      <Section title="Блок героев">
+        <div className="field-label">Ширина в иконках</div>
+        <div className="segmented tray-cols">
+          {Array.from({ length: props.trayColsRange[1] - props.trayColsRange[0] + 1 }, (_, i) => {
+            const n = props.trayColsRange[0] + i;
+            return (
+              <button
+                key={n}
+                type="button"
+                className={props.trayCols === n ? "active" : ""}
+                title={`${n} ${n === 1 ? "герой" : n < 5 ? "героя" : "героев"} в ряду`}
+                onClick={() => {
+                  props.onTrayCols(n);
+                  props.onTool("tray");
+                }}
+              >
+                {n}
+              </button>
+            );
+          })}
+        </div>
+        <p className="hint">
+          Клик ставит блок {props.trayCols}×2. Тяните мышью — рамка прыгает по целым иконкам и обнимает их без лишнего поля. Потом добавьте героев справа.
+        </p>
+      </Section>
+
       <Section title="Ластик">
         <Slider
           label="Радиус"
@@ -248,7 +279,7 @@ export function EditorSidebar(props: Props) {
       <Section title="Управление">
         <ul className="hint-list">
           <li>Колесо — масштаб</li>
-          <li>Ctrl + колесо — радиус ластика / шаг кисти или фигуры</li>
+          <li>Ctrl + колесо — радиус ластика / шаг кисти или фигуры / ширина блока героев</li>
           <li>Фигура: Shift — ровно (квадрат, круг, линия 0/45/90°), Alt — от центра</li>
           <li>Пробел + мышь, средняя или правая кнопка — двигать холст</li>
           <li>Delete — удалить выбранное</li>
