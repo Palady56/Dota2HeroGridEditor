@@ -413,6 +413,26 @@ body {
   font-size: 11px;
 }
 
+.stat.warn {
+  background: var(--gold-soft);
+  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+  color: var(--gold);
+}
+
+.stat.warn b {
+  color: var(--gold);
+}
+
+.stat.danger {
+  background: var(--danger-bg);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.stat.danger b {
+  color: var(--danger);
+}
+
 .status-issues {
   display: inline-flex;
   align-items: center;

@@ -12,8 +12,65 @@ import {
 import { GLYPH_ANCHOR } from "../render/glyph";
 import { glyphsForPoints } from "../symbols/symbolSet";
 
+/** Dota starts to hitch around this many categories; the editor warns here. */
+export const DOTA_SYMBOL_WARN = 2000;
+/** Past this, the in-game grid often freezes or crashes while you edit it. */
+export const DOTA_SYMBOL_DANGER = 2500;
+
+/** Drop a second stamp of the same glyph closer than this — they stack as extra Dota panels. */
+const STAMP_DEDUP = 6;
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+export function symbolCount(categories: ReadonlyArray<Pick<Category, "heroIds">>): number {
+  return categories.filter((c) => c.heroIds.length === 0).length;
+}
+
+/**
+ * Keep outline stamps over fill, and skip a glyph that already sits in the same
+ * 6 px cell. Overlapping copies look the same in the editor but each one is a
+ * separate panel in Dota.
+ */
+export function compactStamps(stamps: Category[], minGap = STAMP_DEDUP): Category[] {
+  if (stamps.length < 2) return stamps;
+  const cell = Math.max(1, minGap);
+  const cols = Math.ceil(GRID_SIZE.width / cell) + 2;
+  const kept: Category[] = [];
+  const buckets = new Map<number, number[]>();
+  const min2 = minGap * minGap;
+
+  const tooClose = (x: number, y: number, name: string): boolean => {
+    const cx = Math.floor(x / cell);
+    const cy = Math.floor(y / cell);
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const list = buckets.get((cy + oy) * cols + (cx + ox));
+        if (!list) continue;
+        for (const i of list) {
+          const s = kept[i];
+          if (s.name !== name) continue;
+          const dx = s.x + GLYPH_ANCHOR.dx - x;
+          const dy = s.y + GLYPH_ANCHOR.dy - y;
+          if (dx * dx + dy * dy < min2) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  for (const stamp of stamps) {
+    const x = stamp.x + GLYPH_ANCHOR.dx;
+    const y = stamp.y + GLYPH_ANCHOR.dy;
+    if (tooClose(x, y, stamp.name)) continue;
+    const key = Math.floor(y / cell) * cols + Math.floor(x / cell);
+    const list = buckets.get(key);
+    if (list) list.push(kept.length);
+    else buckets.set(key, [kept.length]);
+    kept.push(stamp);
+  }
+  return kept;
 }
 
 /** Category for a glyph centred on (px, py), clipped to the grid. Null if nothing fits. */
@@ -59,7 +116,9 @@ export function stampsFromConversion(
   symbols: SymbolSettings,
   grid: Size = GRID_SIZE,
 ): Category[] {
-  return [...stampsFromFill(out.fill, settings, grid), ...stampsFromPoints(out.points, symbols, grid)];
+  const outline = stampsFromPoints(out.points, symbols, grid);
+  const fill = stampsFromFill(out.fill, settings, grid);
+  return compactStamps([...outline, ...fill]);
 }
 
 export function stampsFromPoints(

@@ -1,5 +1,6 @@
 import { DOTA_JSON_VERSION, GRID_SIZE } from "../model/types";
 import { HERO_BY_ID } from "../heroes/heroes";
+import { DOTA_SYMBOL_DANGER, DOTA_SYMBOL_WARN } from "../layout/stamps";
 
 export type IssueLevel = "error" | "warning" | "info";
 
@@ -66,6 +67,7 @@ export function validateDotaGridFile(raw: unknown): ValidationIssue[] {
     let beyondBottom = 0;
     let beyondRight = 0;
     let negative = 0;
+    let symbols = 0;
 
     cfg.categories.forEach((cat, ki) => {
       const path = `${cfgLabel}, категория №${ki + 1}`;
@@ -95,6 +97,7 @@ export function validateDotaGridFile(raw: unknown): ValidationIssue[] {
         categoryError(`${path}: hero_ids должен быть массивом`);
         return;
       }
+      if (cat.hero_ids.length === 0) symbols++;
       cat.hero_ids.forEach((id) => {
         if (!Number.isInteger(id) || (id as number) <= 0) {
           categoryError(`${path}: id героя «${String(id)}» должен быть целым числом > 0`);
@@ -104,6 +107,17 @@ export function validateDotaGridFile(raw: unknown): ValidationIssue[] {
       });
     });
 
+    if (symbols >= DOTA_SYMBOL_DANGER) {
+      issues.push({
+        level: "warning",
+        message: `${cfgLabel}: ${symbols} символов — Dota при редактировании сетки сильно лагает и может вылететь. Увеличьте шаг между символами.`,
+      });
+    } else if (symbols >= DOTA_SYMBOL_WARN) {
+      issues.push({
+        level: "warning",
+        message: `${cfgLabel}: ${symbols} символов — в Dota сетка может лагать. Лучше уложиться в ${DOTA_SYMBOL_WARN}.`,
+      });
+    }
     if (unknownHeroes.size) {
       issues.push({
         level: "warning",

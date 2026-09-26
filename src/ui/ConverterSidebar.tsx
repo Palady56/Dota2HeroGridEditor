@@ -267,7 +267,7 @@ export function ConverterSidebar(props: Props) {
           min={2}
           max={20}
           step={0.5}
-          hint="Меньше — плотнее и больше категорий"
+          hint="Меньше — плотнее, но каждый символ — отдельная рамка в Dota. От 2000 сетка лагает, от 2500 игра может вылететь."
           onChange={(spacing) => onSettings({ spacing })}
         />
         <label className="field">

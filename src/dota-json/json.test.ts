@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseDotaGridJson } from "./parse";
 import { serializeDotaGrid } from "./serialize";
 import { validateDotaGridFile } from "./validate";
+import { DOTA_SYMBOL_WARN } from "../layout/stamps";
 import { inferCategoryKind } from "../model/types";
 import { withoutCaptions } from "../model/document";
 import kaneki from "./fixtures/hero_grid_config.json";
@@ -50,6 +51,22 @@ describe("dota json", () => {
       expect(cat.height).toBeCloseTo(orig.height, 5);
       expect(cat.heroIds).toEqual(orig.heroIds);
     });
+  });
+
+  it("warns when a grid has too many symbols for Dota", () => {
+    const categories = Array.from({ length: DOTA_SYMBOL_WARN }, () => ({
+      category_name: ".",
+      x_position: 0,
+      y_position: 0,
+      width: 30,
+      height: 30,
+      hero_ids: [],
+    }));
+    const issues = validateDotaGridFile({
+      version: 3,
+      configs: [{ config_name: "Heavy", categories }],
+    });
+    expect(issues.some((i) => i.message.includes("2000 символов") && i.message.includes("лагать"))).toBe(true);
   });
 
   it("parses the favorite grid even when a hero appears more than once", () => {

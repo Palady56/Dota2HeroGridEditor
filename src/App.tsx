@@ -47,7 +47,7 @@ import { placementBeside, placementRect } from "./image/placement";
 import { loadImageSource, rasterizeSource, type ImageSource } from "./image/source";
 import { createConversionClient, type ConversionClient } from "./image/conversionClient";
 import type { ConversionOutput } from "./image/convert";
-import { stampsFromConversion } from "./layout/stamps";
+import { DOTA_SYMBOL_DANGER, DOTA_SYMBOL_WARN, stampsFromConversion, symbolCount } from "./layout/stamps";
 import { applyStyle } from "./symbols/artStyles";
 import { StyleGallery } from "./ui/StyleGallery";
 import { SYMBOL_PRESETS } from "./symbols/symbolSet";
@@ -552,8 +552,11 @@ export function App() {
       else if (c.origin === "generated") generated++;
       else manual++;
     }
-    return { generated, manual, trays, hidden: HEROES.length - heroes.size };
+    const symbols = symbolCount(config.categories);
+    return { generated, manual, trays, symbols, hidden: HEROES.length - heroes.size };
   }, [config.categories]);
+  const symbolLoad =
+    stats.symbols >= DOTA_SYMBOL_DANGER ? "danger" : stats.symbols >= DOTA_SYMBOL_WARN ? "warn" : "";
 
   return (
     <div className={`app ${tab !== "convert" ? "with-inspector" : ""}`}>
@@ -736,12 +739,29 @@ export function App() {
       {report && <IssuesDialog report={report} onClose={() => setReport(null)} />}
 
       <footer className="statusbar">
-        <span className="stat" title={`Авто ${stats.generated}, вручную или из файла ${stats.manual}`}>
-          Символов <b>{stats.generated + stats.manual}</b>
+        <span
+          className={`stat${symbolLoad ? ` ${symbolLoad}` : ""}`}
+          title={
+            symbolLoad === "danger"
+              ? `Слишком много рамок для Dota: игра может вылететь. Сейчас ${stats.symbols}, безопаснее меньше ${DOTA_SYMBOL_WARN}.`
+              : symbolLoad === "warn"
+                ? `Много рамок для Dota — сетка может лагать. Сейчас ${stats.symbols}.`
+                : `Авто ${stats.generated}, вручную или из файла ${stats.manual}`
+          }
+        >
+          Символов <b>{stats.symbols}</b>
           <span className="stat-sub">
             авто {stats.generated} · вручную {stats.manual}
           </span>
         </span>
+        {symbolLoad && (
+          <span className={`status-issues${symbolLoad === "danger" ? " error" : ""}`} role="status">
+            <IconAlert size={13} />
+            {symbolLoad === "danger"
+              ? `Dota может вылететь: ${stats.symbols} символов. Увеличьте шаг или уберите лишнее.`
+              : `${stats.symbols} символов — в Dota сетка может лагать. Лучше меньше ${DOTA_SYMBOL_WARN}.`}
+          </span>
+        )}
         <span className="stat">
           Блоков героев <b>{stats.trays}</b>
         </span>
