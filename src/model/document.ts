@@ -41,6 +41,30 @@ export function replaceGenerated(doc: GridDocument, stamps: Category[]): GridDoc
   });
 }
 
+/** Replace one photo's stamps and leave every other photo on the grid. */
+export function replaceArt(doc: GridDocument, artId: string, stamps: Category[]): GridDocument {
+  return updateActiveCategories(doc, (cats) => {
+    const kept = cats.filter((c) => c.artId !== artId && !(c.origin === "generated" && !c.artId));
+    const trays = kept.filter((c) => inferCategoryKind(c) === "tray");
+    const rest = kept.filter((c) => inferCategoryKind(c) !== "tray");
+    return [...rest, ...stamps, ...trays];
+  });
+}
+
+/** Give the live photo an id before another photo is added, so its stamps are no longer "the current one". */
+export function claimUntaggedArt(doc: GridDocument, artId: string): GridDocument {
+  return updateActiveCategories(doc, (cats) =>
+    cats.map((c) => (c.origin === "generated" && !c.artId ? { ...c, artId } : c)),
+  );
+}
+
+/** Keep the current conversion on the grid when another photo is added. */
+export function keepGeneratedArt(doc: GridDocument): GridDocument {
+  return updateActiveCategories(doc, (cats) =>
+    cats.map((c) => (c.origin === "generated" ? { ...c, origin: "manual" as const } : c)),
+  );
+}
+
 /** A new picture replaces the old art but keeps hero trays and manual work. */
 export function removeImportedArt(doc: GridDocument): GridDocument {
   return updateActiveCategories(doc, (cats) =>

@@ -52,11 +52,9 @@ describe("dota json", () => {
     });
   });
 
-  it("parses the favorite grid and warns on duplicate hero 5", () => {
+  it("parses the favorite grid even when a hero appears more than once", () => {
     const issues = validateDotaGridFile(favorite);
-    expect(issues.some((i) => i.level === "warning" && i.message.includes(" 5 "))).toBe(
-      true,
-    );
+    expect(issues.every((i) => !i.message.includes("стоит в сетке"))).toBe(true);
     const doc = parseDotaGridJson(JSON.stringify(favorite));
     expect(doc.configs[0].categories).toHaveLength(844);
   });

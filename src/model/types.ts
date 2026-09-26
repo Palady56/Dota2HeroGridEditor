@@ -21,6 +21,8 @@ export type Category = {
   height: number;
   heroIds: number[];
   origin: CategoryOrigin;
+  /** Which placed photo these stamps belong to. Editor-only; not written to the Dota file. */
+  artId?: string;
 };
 
 export type GridConfig = {

@@ -8,12 +8,23 @@ import {
   fitTray,
   moveCategories,
   moveHero,
+  pasteCategories,
   removeHero,
   replaceGlyph,
+  snapshotSelection,
 } from "./operations";
 import { traySize, traySlots } from "../render/trayLayout";
 import { hitTest, idsInRect } from "./hitTest";
-import { emptyDocument, removeImportedArt, replaceGenerated, activeConfig, updateActiveCategories } from "../model/document";
+import {
+  emptyDocument,
+  claimUntaggedArt,
+  keepGeneratedArt,
+  removeImportedArt,
+  replaceArt,
+  replaceGenerated,
+  activeConfig,
+  updateActiveCategories,
+} from "../model/document";
 import { inferCategoryKind, type Category } from "../model/types";
 import { unusedHeroCount, HEROES } from "../heroes/heroes";
 
@@ -63,6 +74,35 @@ describe("document", () => {
     expect(activeConfig(removeImportedArt(doc)).categories.map((c) => c.id)).toEqual(["t1", "m1"]);
   });
 
+  it("replaces one photo and leaves the other photo's stamps", () => {
+    let doc = emptyDocument();
+    doc = updateActiveCategories(doc, () => [
+      cat({ id: "a1", artId: "photo-a" }),
+      cat({ id: "b1", artId: "photo-b" }),
+      cat({ id: "tray", heroIds: [1], width: 200, height: 300, origin: "imported" }),
+    ]);
+    const next = replaceArt(doc, "photo-a", [cat({ id: "a2", artId: "photo-a" })]);
+    expect(activeConfig(next).categories.map((c) => c.id)).toEqual(["b1", "a2", "tray"]);
+  });
+
+  it("claims the live photo before another one is added", () => {
+    let doc = emptyDocument();
+    doc = updateActiveCategories(doc, () => [cat({ id: "g1" }), cat({ id: "kept", artId: "other" })]);
+    const claimed = claimUntaggedArt(doc, "photo-a");
+    expect(activeConfig(claimed).categories.map((c) => c.artId)).toEqual(["photo-a", "other"]);
+    const next = replaceArt(claimed, "photo-b", [cat({ id: "b1", artId: "photo-b" })]);
+    expect(activeConfig(next).categories.map((c) => c.id)).toEqual(["g1", "kept", "b1"]);
+  });
+
+  it("keeps generated art as manual so a second photo can sit beside it", () => {
+    let doc = emptyDocument();
+    doc = updateActiveCategories(doc, () => [cat({ id: "g1" }), cat({ id: "m1", origin: "manual" })]);
+    const kept = keepGeneratedArt(doc);
+    expect(activeConfig(kept).categories.map((c) => c.origin)).toEqual(["manual", "manual"]);
+    const next = replaceGenerated(kept, [cat({ id: "g2" })]);
+    expect(activeConfig(next).categories.map((c) => c.id)).toEqual(["g1", "m1", "g2"]);
+  });
+
   it("treats large empty categories as hero trays", () => {
     expect(inferCategoryKind(cat({ width: 200, height: 300 }))).toBe("tray");
     expect(inferCategoryKind(cat({ name: "をプレイし", width: 108, height: 30 }))).toBe("caption");
@@ -89,11 +129,13 @@ describe("operations", () => {
     expect(cats.map((c) => c.id)).toEqual([tray.id]);
 
     cats = addHeroes(cats, tray.id, [1, 2, 2, 3]);
-    expect(cats[0].heroIds).toEqual([1, 2, 3]);
+    expect(cats[0].heroIds).toEqual([1, 2, 2, 3]);
+    cats = addHeroes(cats, tray.id, [2]);
+    expect(cats[0].heroIds).toEqual([1, 2, 2, 3, 2]);
     cats = moveHero(cats, tray.id, 0, 1);
-    expect(cats[0].heroIds).toEqual([2, 1, 3]);
-    cats = removeHero(cats, tray.id, 2);
-    expect(cats[0].heroIds).toEqual([2, 1]);
+    expect(cats[0].heroIds).toEqual([2, 1, 2, 3, 2]);
+    cats = removeHero(cats, tray.id, 4);
+    expect(cats[0].heroIds).toEqual([2, 1, 2, 3]);
     cats = fitTray(cats, tray.id);
     expect(cats[0].width).toBe(traySize(cols, 1).width);
     expect(cats[0].height).toBe(traySize(cols, 1).height);
@@ -111,6 +153,24 @@ describe("operations", () => {
     expect(hitTest(cats, 150, 150)).toBe("t");
     expect(hitTest(cats, 500, 500)).toBeNull();
     expect(idsInRect(cats, { x: 15, y: 15, width: 10, height: 10 })).toEqual(new Set(["g", "t"]));
+  });
+
+  it("copies a selection and pastes it with new ids and an offset", () => {
+    const tray = createTray({ x: 40, y: 40, width: 110, height: 194 });
+    tray.heroIds = [11, 11];
+    const cats = [cat({ id: "a", x: 10, y: 20, origin: "generated" }), tray];
+    const clip = snapshotSelection(cats, new Set(["a", tray.id]));
+    expect(clip).toHaveLength(2);
+    expect(clip[1].heroIds).toEqual([11, 11]);
+    const { categories, ids } = pasteCategories(cats, clip, 24, 24);
+    expect(categories).toHaveLength(4);
+    expect(ids).toHaveLength(2);
+    expect(ids.every((id) => id !== "a" && id !== tray.id)).toBe(true);
+    const copyA = categories.find((c) => c.id === ids[0]);
+    const copyTray = categories.find((c) => c.id === ids[1]);
+    expect(copyA).toMatchObject({ x: 34, y: 44, origin: "manual", name: "." });
+    expect(copyTray?.heroIds).toEqual([11, 11]);
+    expect(copyTray?.x).toBe(tray.x + 24);
   });
 });
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GridParseError, parseDotaGridJson, parseDotaGridValue } from "./dota-json/parse";
+import { GridParseError, parseDotaGridJson } from "./dota-json/parse";
 import { serializeDotaGrid, toDotaFile } from "./dota-json/serialize";
 import { validateDotaGridFile, type ValidationIssue } from "./dota-json/validate";
 import {
@@ -9,12 +9,11 @@ import {
   duplicateActiveConfig,
   mergeConfigInto,
   removeActiveConfig,
-  removeImportedArt,
+  claimUntaggedArt,
   renameActiveConfig,
-  replaceGenerated,
+  replaceArt,
   setActiveConfig,
   updateActiveCategories,
-  withoutCaptions,
 } from "./model/document";
 import { createId } from "./model/ids";
 import {
@@ -37,13 +36,14 @@ import {
   GRID_SIZE,
   defaultConversionSettings,
   inferCategoryKind,
+  type Category,
   type ConversionSettings,
   type GridDocument,
   type Placement,
   type SymbolSettings,
 } from "./model/types";
 import { HEROES } from "./heroes/heroes";
-import { placementRect } from "./image/placement";
+import { placementBeside, placementRect } from "./image/placement";
 import { loadImageSource, rasterizeSource, type ImageSource } from "./image/source";
 import { createConversionClient, type ConversionClient } from "./image/conversionClient";
 import type { ConversionOutput } from "./image/convert";
@@ -52,7 +52,7 @@ import { applyStyle } from "./symbols/artStyles";
 import { StyleGallery } from "./ui/StyleGallery";
 import { SYMBOL_PRESETS } from "./symbols/symbolSet";
 import { useDocumentHistory } from "./editor/useDocumentHistory";
-import { deleteCategories, nudgeCategories } from "./editor/operations";
+import { deleteCategories, nudgeCategories, PASTE_OFFSET, pasteCategories, snapshotSelection } from "./editor/operations";
 import {
   DEFAULT_SHAPE_SETTINGS,
   frameOutline,
@@ -63,7 +63,7 @@ import {
 } from "./editor/shapes";
 import { Toolbar, type Tab } from "./ui/Toolbar";
 import { ConverterSidebar } from "./ui/ConverterSidebar";
-import { PhotoPane } from "./ui/PhotoPane";
+import { PhotoPane, type PlacedPhoto } from "./ui/PhotoPane";
 import { GridPreviewPane } from "./ui/GridPreviewPane";
 import { EditorCanvas, type Tool } from "./ui/EditorCanvas";
 import { EditorSidebar } from "./ui/EditorSidebar";
@@ -71,7 +71,6 @@ import { Inspector } from "./ui/Inspector";
 import { TRAY_COLS_RANGE, getHeroIconScale, setHeroIconScale } from "./render/trayLayout";
 import { useTheme } from "./ui/theme";
 import { IconAlert } from "./ui/icons";
-import exampleGrid from "./dota-json/fixtures/hero_grid_config.json";
 
 const TOOL_KEYS: Record<string, Tool> = {
   KeyV: "select",
@@ -121,7 +120,11 @@ export function App() {
   const [placement, setPlacement] = useState<Placement>(DEFAULT_PLACEMENT);
   const [settings, setSettings] = useState<ConversionSettings>(() => restored?.settings ?? defaultConversionSettings());
   const [symbols, setSymbols] = useState<SymbolSettings>(() => restored?.symbols ?? SYMBOL_PRESETS[0].settings);
-  const [conversion, setConversion] = useState<(ConversionOutput & { settings: ConversionSettings }) | null>(null);
+  const [conversion, setConversion] = useState<(ConversionOutput & { settings: ConversionSettings; artId: string }) | null>(
+    null,
+  );
+  const [photos, setPhotos] = useState<PlacedPhoto[]>([]);
+  const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
   const [showMask, setShowMask] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [tool, setTool] = useState<Tool>("select");
@@ -161,13 +164,18 @@ export function App() {
 
   const requestSeq = useRef(0);
   const requestSettings = useRef(new Map<number, ConversionSettings>());
+  const requestArt = useRef(new Map<number, string>());
+  const clipboard = useRef<Category[]>([]);
+  const pasteCount = useRef(0);
 
   useEffect(() => {
     const client = createConversionClient((out, id) => {
       const used = id === undefined ? undefined : requestSettings.current.get(id);
-      if (!used) return;
+      const artId = id === undefined ? undefined : requestArt.current.get(id);
+      if (!used || !artId) return;
       for (const key of requestSettings.current.keys()) if (key <= id!) requestSettings.current.delete(key);
-      setConversion({ ...out, settings: used });
+      for (const key of requestArt.current.keys()) if (key <= id!) requestArt.current.delete(key);
+      setConversion({ ...out, settings: used, artId });
     });
     clientRef.current = client;
     return () => {
@@ -177,24 +185,30 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!source) return;
+    if (!source || !activePhotoId) return;
     rasterCanvas.current ??= document.createElement("canvas");
     const rect = placementRect(source.width, source.height, GRID_SIZE, placement);
     const image = rasterizeSource(source, rect, placement, rasterCanvas.current);
     const id = ++requestSeq.current;
     requestSettings.current.set(id, settings);
+    requestArt.current.set(id, activePhotoId);
     clientRef.current?.request({ image, rect, rotation: placement.rotation, settings, id });
-  }, [source, placement, settings]);
+  }, [source, placement, settings, activePhotoId]);
 
   useEffect(() => {
-    if (!conversion) return;
-    const stamps = stampsFromConversion(conversion, conversion.settings, symbols);
-    commit((d) => replaceGenerated(d, stamps), "generate");
-  }, [conversion, symbols, commit]);
+    if (!conversion || conversion.artId !== activePhotoId) return;
+    const stamps = stampsFromConversion(conversion, conversion.settings, symbols).map((stamp) => ({
+      ...stamp,
+      artId: conversion.artId,
+    }));
+    commit((d) => replaceArt(d, conversion.artId, stamps), "generate");
+  }, [conversion, symbols, commit, activePhotoId]);
 
   const loadDocument = useCallback(
     (next: GridDocument, message: string) => {
       commit(() => next);
+      setPhotos([]);
+      setActivePhotoId(null);
       setSource(null);
       setConversion(null);
       setSelected(new Set());
@@ -203,15 +217,62 @@ export function App() {
     [commit],
   );
 
-  const onUpload = async (file: File) => {
+  const onPlacement = (next: Placement) => {
+    setPlacement(next);
+    setPhotos((list) => list.map((photo) => (photo.id === activePhotoId ? { ...photo, placement: next } : photo)));
+  };
+
+  const selectPhoto = (id: string) => {
+    const photo = photos.find((item) => item.id === id);
+    if (!photo || photo.id === activePhotoId) return;
+    setActivePhotoId(photo.id);
+    setSource(photo.source);
+    setPlacement(photo.placement);
+    setConversion(null);
+    setStatus(photo.source ? `Выбрано фото ${photo.name}` : `Выбрано «${photo.name}». Замените его новым файлом или оставьте как есть.`);
+  };
+
+  const onUpload = async (file: File, mode: "add" | "replace" = "add") => {
     try {
       const next = await loadImageSource(file);
+      requestSettings.current.clear();
+      requestArt.current.clear();
+      requestSeq.current += 1;
+      if (mode === "replace" && activePhotoId) {
+        setPhotos((list) =>
+          list.map((photo) => (photo.id === activePhotoId ? { ...photo, source: next, name: next.name } : photo)),
+        );
+        setSource(next);
+        setConversion(null);
+        setStatus(`Заменено фото «${next.name}». Остальные картинки на месте.`);
+        return;
+      }
+      const id = createId("art");
+      const legacyId = createId("art");
+      const hasLooseArt = config.categories.some((c) => c.origin === "generated" && !c.artId);
+      const claimId = activePhotoId ?? (hasLooseArt ? legacyId : null);
+      if (claimId) commit((d) => claimUntaggedArt(d, claimId));
+      const beside =
+        config.categories.length > 0
+          ? placementBeside(next.width, next.height, GRID_SIZE, config.categories)
+          : DEFAULT_PLACEMENT;
+      setPhotos((list) => [
+        ...list,
+        ...(claimId === legacyId
+          ? [{ id: legacyId, source: null, name: "Уже на сетке", placement: DEFAULT_PLACEMENT }]
+          : []),
+        { id, source: next, name: next.name, placement: beside },
+      ]);
+      setActivePhotoId(id);
+      setPlacement(beside);
       setSource(next);
-      setPlacement(DEFAULT_PLACEMENT);
       setConversion(null);
       setSelected(new Set());
-      commit(removeImportedArt);
-      setStatus(`Изображение ${file.name}: ${next.width}×${next.height}`);
+      setStatus(
+        photos.length > 0
+          ? `Добавлено фото ${next.name}. Предыдущие остались — выберите нужное в списке, чтобы заменить только его.`
+          : `Изображение ${next.name}: ${next.width}×${next.height}`,
+      );
     } catch {
       setStatus(`Не удалось открыть изображение ${file.name}`);
     }
@@ -232,13 +293,11 @@ export function App() {
     }
   };
 
-  const onExample = () => {
-    loadDocument(withoutCaptions(parseDotaGridValue(exampleGrid)), "Загружен пример Kaneki");
-  };
-
   /** Switching grids ends the photo session, so generated art never lands in another grid. */
   const switchConfig = (update: (d: GridDocument) => GridDocument) => {
     commit(update);
+    setPhotos([]);
+    setActivePhotoId(null);
     setSource(null);
     setConversion(null);
     setSelected(new Set());
@@ -246,6 +305,8 @@ export function App() {
 
   const onClear = () => {
     commit(clearActiveConfig);
+    setPhotos([]);
+    setActivePhotoId(null);
     setSource(null);
     setConversion(null);
     setSelected(new Set());
@@ -362,6 +423,8 @@ export function App() {
       const base = asNew ? addConfig(d, composeName) : renameActiveConfig(d, composeName);
       return updateActiveCategories(base, () => cats);
     });
+    setPhotos([]);
+    setActivePhotoId(null);
     setSource(null);
     setConversion(null);
     setSelected(new Set());
@@ -424,6 +487,26 @@ export function App() {
         setSelected(new Set(config.categories.map((c) => c.id)));
         return;
       }
+      if (mod && e.code === "KeyC") {
+        const clip = snapshotSelection(config.categories, selected);
+        if (clip.length === 0) return;
+        e.preventDefault();
+        clipboard.current = clip;
+        pasteCount.current = 0;
+        setStatus(`Скопировано: ${clip.length}`);
+        return;
+      }
+      if (mod && e.code === "KeyV") {
+        if (clipboard.current.length === 0) return;
+        e.preventDefault();
+        pasteCount.current += 1;
+        const shift = PASTE_OFFSET * pasteCount.current;
+        const result = pasteCategories(config.categories, clipboard.current, shift, shift);
+        commitCategories(() => result.categories, "paste");
+        setSelected(new Set(result.ids));
+        setStatus(`Вставлено: ${result.ids.length}`);
+        return;
+      }
       if (e.code === "Delete" || e.code === "Backspace") {
         if (selected.size === 0) return;
         e.preventDefault();
@@ -484,7 +567,6 @@ export function App() {
         onOpenJson={onOpenJson}
         onExport={onExport}
         onMergeInto={onMergeInto}
-        onExample={onExample}
         onClear={onClear}
         doc={doc}
         onSelectConfig={(id) => switchConfig((d) => setActiveConfig(d, id))}
@@ -514,9 +596,13 @@ export function App() {
         ) : tab === "convert" ? (
           <ConverterSidebar
             hasImage={!!source}
-            onUpload={onUpload}
+            photos={photos.map((photo) => ({ id: photo.id, name: photo.name }))}
+            activePhotoId={activePhotoId}
+            onSelectPhoto={selectPhoto}
+            onUpload={(file) => onUpload(file, "add")}
+            onReplace={(file) => onUpload(file, "replace")}
             placement={placement}
-            onPlacement={setPlacement}
+            onPlacement={onPlacement}
             settings={settings}
             onSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))}
             symbols={symbols}
@@ -578,7 +664,10 @@ export function App() {
               <PhotoPane
                 source={source}
                 placement={placement}
-                onPlacementChange={setPlacement}
+                photos={photos}
+                activeId={activePhotoId}
+                onSelect={selectPhoto}
+                onPlacementChange={onPlacement}
                 mask={conversion?.mask ?? null}
                 showMask={showMask}
               />

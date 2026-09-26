@@ -1,13 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { GRID_SIZE, type Placement } from "../model/types";
-import { drawPlaced, placementFrame, placementRect } from "../image/placement";
+import { drawPlaced, hitPlacement, placementFrame, placementRect } from "../image/placement";
 import type { ImageSource } from "../image/source";
 import { frameCorners, frameHandle, normalizeDeg, rotationToward, snapDeg, type Vec } from "../model/geometry";
+
+export type PlacedPhoto = {
+  id: string;
+  source: ImageSource | null;
+  name: string;
+  placement: Placement;
+};
 
 type Props = {
   source: ImageSource | null;
   placement: Placement;
+  photos: PlacedPhoto[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
   onPlacementChange: (placement: Placement) => void;
   mask: Uint8Array | null;
   showMask: boolean;
@@ -41,11 +51,11 @@ function maskToCanvas(mask: Uint8Array): HTMLCanvasElement {
   return canvas;
 }
 
-export function PhotoPane({ source, placement, onPlacementChange, mask, showMask }: Props) {
+export function PhotoPane({ source, placement, photos, activeId, onSelect, onPlacementChange, mask, showMask }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef<Drag | null>(null);
-  const latest = useRef({ placement, onPlacementChange });
-  latest.current = { placement, onPlacementChange };
+  const latest = useRef({ placement, onPlacementChange, photos, activeId, onSelect });
+  latest.current = { placement, onPlacementChange, photos, activeId, onSelect };
   const [cursor, setCursor] = useState("grab");
   /** Grid pixels per screen pixel; the canvas is shown scaled down. */
   const [pxScale, setPxScale] = useState(1);
@@ -74,6 +84,24 @@ export function PhotoPane({ source, placement, onPlacementChange, mask, showMask
     if (!canvas || !ctx) return;
     ctx.fillStyle = "#0e1115";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (const photo of photos) {
+      if (photo.id === activeId || !photo.source) continue;
+      const r = placementRect(photo.source.width, photo.source.height, GRID_SIZE, photo.placement);
+      ctx.save();
+      ctx.globalAlpha = 0.72;
+      drawPlaced(ctx, photo.source.bitmap, r, photo.placement);
+      const idle = placementFrame(r, photo.placement);
+      const corners = frameCorners(idle);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "rgba(236, 231, 221, 0.45)";
+      ctx.lineWidth = pxScale;
+      ctx.setLineDash([4 * pxScale, 4 * pxScale]);
+      ctx.beginPath();
+      corners.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
     if (source && frame && handle) {
       const r = placementRect(source.width, source.height, GRID_SIZE, placement);
       ctx.globalAlpha = maskCanvas ? 0.45 : 1;
@@ -110,7 +138,7 @@ export function PhotoPane({ source, placement, onPlacementChange, mask, showMask
       ctx.fillText("Загрузите изображение слева", canvas.width / 2, canvas.height / 2);
       ctx.textAlign = "left";
     }
-  }, [source, placement, maskCanvas, pxScale]);
+  }, [source, placement, photos, activeId, maskCanvas, pxScale]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -148,9 +176,30 @@ export function PhotoPane({ source, placement, onPlacementChange, mask, showMask
       height={GRID_SIZE.height}
       style={{ cursor: source ? cursor : "default" }}
       onPointerDown={(e) => {
+        if (!source && photos.length === 0) return;
+        const point = toGrid(e);
+        const { photos: list, activeId: current, onSelect: select, placement: placed } = latest.current;
+        const active = list.find((photo) => photo.id === current);
+        const others = list.filter((photo) => photo.id !== current && photo.source).reverse();
+        const hit = [...(active?.source ? [active] : []), ...others].find((photo) =>
+          photo.source
+            ? hitPlacement(
+                point.x,
+                point.y,
+                photo.source.width,
+                photo.source.height,
+                GRID_SIZE,
+                photo.id === current ? placed : photo.placement,
+              )
+            : false,
+        );
+        if (hit && hit.id !== current) {
+          select(hit.id);
+          return;
+        }
         if (!source) return;
         e.currentTarget.setPointerCapture(e.pointerId);
-        if (nearHandle(toGrid(e))) {
+        if (nearHandle(point)) {
           drag.current = { kind: "rotate" };
           setCursor("crosshair");
           return;

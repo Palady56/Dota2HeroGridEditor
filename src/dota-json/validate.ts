@@ -19,11 +19,6 @@ function isFiniteNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
-function heroLabel(id: number): string {
-  const hero = HERO_BY_ID.get(id);
-  return hero ? `${id} (${hero.name})` : String(id);
-}
-
 export function validateDotaGridFile(raw: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   let categoryErrors = 0;
@@ -67,7 +62,6 @@ export function validateDotaGridFile(raw: unknown): ValidationIssue[] {
       return;
     }
 
-    const heroCount = new Map<number, number>();
     const unknownHeroes = new Set<number>();
     let beyondBottom = 0;
     let beyondRight = 0;
@@ -106,20 +100,10 @@ export function validateDotaGridFile(raw: unknown): ValidationIssue[] {
           categoryError(`${path}: id героя «${String(id)}» должен быть целым числом > 0`);
           return;
         }
-        const n = id as number;
-        heroCount.set(n, (heroCount.get(n) ?? 0) + 1);
-        if (!HERO_BY_ID.has(n)) unknownHeroes.add(n);
+        if (!HERO_BY_ID.has(id as number)) unknownHeroes.add(id as number);
       });
     });
 
-    for (const [id, count] of heroCount) {
-      if (count > 1) {
-        issues.push({
-          level: "warning",
-          message: `${cfgLabel}: герой ${heroLabel(id)} стоит в сетке ${count} раза`,
-        });
-      }
-    }
     if (unknownHeroes.size) {
       issues.push({
         level: "warning",

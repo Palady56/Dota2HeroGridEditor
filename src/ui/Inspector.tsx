@@ -255,6 +255,14 @@ function SingleCategory({
                 <button type="button" className="btn tiny" onClick={() => commitCategories((cats) => moveHero(cats, c.id, i, 1))}>
                   ↓
                 </button>
+                <button
+                  type="button"
+                  className="btn tiny"
+                  title="Добавить ещё одну копию этого героя"
+                  onClick={() => commitCategories((cats) => addHeroes(cats, c.id, [id]))}
+                >
+                  +
+                </button>
                 <button type="button" className="btn tiny" onClick={() => commitCategories((cats) => removeHero(cats, c.id, i))}>
                   ×
                 </button>

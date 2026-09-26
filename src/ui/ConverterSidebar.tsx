@@ -2,11 +2,16 @@ import type { ConversionSettings, FillMode, Placement, SymbolSettings } from "..
 import { DEFAULT_PLACEMENT } from "../model/types";
 import { findPresetId, SYMBOL_PRESETS } from "../symbols/symbolSet";
 import { Checkbox, FileButton, Section, Slider } from "./controls";
+import { IconImage } from "./icons";
 import { TransformControls } from "./TransformControls";
 
 type Props = {
   hasImage: boolean;
+  photos: { id: string; name: string }[];
+  activePhotoId: string | null;
+  onSelectPhoto: (id: string) => void;
   onUpload: (file: File) => void;
+  onReplace: (file: File) => void;
   placement: Placement;
   onPlacement: (p: Placement) => void;
   settings: ConversionSettings;
@@ -40,11 +45,47 @@ export function ConverterSidebar(props: Props) {
     <>
       <Section title="Изображение">
         <FileButton
-          label={props.hasImage ? "Заменить изображение" : "Загрузить изображение"}
+          label={props.photos.length > 0 ? "Добавить ещё фото" : "Добавить изображение"}
+          hint={
+            props.photos.length > 0
+              ? "Предыдущее фото останется на сетке, новое встанет рядом"
+              : "Нажмите или перетащите файл сюда"
+          }
           accept="image/*"
-          className="btn primary wide"
+          className="image-upload"
+          icon={<IconImage size={22} />}
           onFile={props.onUpload}
         />
+        {props.photos.length > 0 && (
+          <div className="photo-list" role="listbox" aria-label="Фото на сетке">
+            {props.photos.map((photo, index) => (
+              <button
+                key={photo.id}
+                type="button"
+                role="option"
+                aria-selected={photo.id === props.activePhotoId}
+                className={photo.id === props.activePhotoId ? "active" : ""}
+                title={photo.name}
+                onClick={() => props.onSelectPhoto(photo.id)}
+              >
+                <span className="photo-index">{index + 1}</span>
+                <span className="photo-name">{photo.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {props.photos.length > 0 && (
+          <FileButton
+            label="Заменить выбранное фото"
+            accept="image/*"
+            className="btn wide"
+            title="Меняет только выбранное фото. Остальные картинки на сетке остаются."
+            onFile={props.onReplace}
+          />
+        )}
+        {props.photos.length > 1 && (
+          <p className="hint">Выбранное фото подсвечено. Замена и ползунки меняют только его, остальные картинки остаются.</p>
+        )}
         <Slider
           label="Размер объекта"
           value={placement.scale}

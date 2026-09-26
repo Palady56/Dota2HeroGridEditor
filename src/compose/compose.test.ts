@@ -165,7 +165,7 @@ describe("restored ids", () => {
 });
 
 describe("validation messages", () => {
-  it("warns about grid overflow, unknown heroes and per-grid duplicates only", () => {
+  it("warns about grid overflow and unknown heroes, not repeated heroes", () => {
     const file = {
       version: 3,
       configs: [

@@ -123,8 +123,7 @@ export function replaceGlyph(
 export function addHeroes(cats: Category[], trayId: string, heroIds: number[]): Category[] {
   return cats.map((c) => {
     if (c.id !== trayId) return c;
-    const merged = [...c.heroIds];
-    for (const id of heroIds) if (!merged.includes(id)) merged.push(id);
+    const merged = [...c.heroIds, ...heroIds];
     const cols = trayColumns(c.width);
     const need = Math.max(1, Math.ceil(merged.length / cols));
     const rows = Math.max(trayRows(c.height, false), need);
@@ -148,4 +147,31 @@ export function moveHero(cats: Category[], trayId: string, index: number, delta:
     [ids[index], ids[target]] = [ids[target], ids[index]];
     return markManual({ ...c, heroIds: ids });
   });
+}
+
+export const PASTE_OFFSET = 24;
+
+export function snapshotSelection(cats: Category[], ids: ReadonlySet<string>): Category[] {
+  return cats
+    .filter((c) => ids.has(c.id))
+    .map((c) => ({ ...c, heroIds: [...c.heroIds] }));
+}
+
+export function pasteCategories(
+  cats: Category[],
+  clip: Category[],
+  dx = PASTE_OFFSET,
+  dy = PASTE_OFFSET,
+): { categories: Category[]; ids: string[] } {
+  if (clip.length === 0) return { categories: cats, ids: [] };
+  const pasted = clip.map((c) => ({
+    ...c,
+    id: createId("cat"),
+    x: round2(clamp(c.x + dx, 0, GRID_SIZE.width - 1)),
+    y: round2(clamp(c.y + dy, 0, GRID_SIZE.height - 1)),
+    heroIds: [...c.heroIds],
+    origin: "manual" as const,
+    artId: undefined,
+  }));
+  return { categories: [...cats, ...pasted], ids: pasted.map((c) => c.id) };
 }

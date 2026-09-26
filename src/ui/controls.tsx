@@ -92,6 +92,7 @@ export function FileButton({
   title,
   multiple = false,
   icon,
+  hint,
 }: {
   label: string;
   icon?: ReactNode;
@@ -101,11 +102,27 @@ export function FileButton({
   className?: string;
   title?: string;
   multiple?: boolean;
+  hint?: string;
 }) {
+  const take = (files: FileList | File[]) => {
+    [...files].forEach(onFile);
+  };
   return (
-    <label className={className} title={title}>
+    <label
+      className={className}
+      title={title}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        take(e.dataTransfer.files);
+      }}
+    >
       {icon}
       <span className="btn-label">{label}</span>
+      {hint ? <span className="file-button-hint">{hint}</span> : null}
       <input
         type="file"
         accept={accept}
@@ -114,7 +131,7 @@ export function FileButton({
         onChange={(e) => {
           const files = [...(e.target.files ?? [])];
           e.target.value = "";
-          files.forEach(onFile);
+          take(files);
         }}
       />
     </label>

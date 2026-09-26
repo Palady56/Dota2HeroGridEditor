@@ -15,7 +15,6 @@ import {
   IconPencil,
   IconPlus,
   IconRedo,
-  IconSparkles,
   IconSun,
   IconTrash,
   IconUndo,
@@ -33,7 +32,6 @@ type Props = {
   onOpenJson: (file: File) => void;
   onExport: () => void;
   onMergeInto: (file: File) => void;
-  onExample: () => void;
   onClear: () => void;
   doc: GridDocument;
   onSelectConfig: (id: string) => void;
@@ -119,10 +117,6 @@ export function Toolbar(props: Props) {
       </div>
 
       <div className="toolbar-group right">
-        <button type="button" className="btn ghost" onClick={props.onExample} title="Временная кнопка: загрузить пример Kaneki">
-          <IconSparkles />
-          <span className="btn-label">Пример</span>
-        </button>
         <button type="button" className="btn ghost" onClick={props.onClear} title="Очистить текущую сетку">
           <IconEraser />
           <span className="btn-label">Очистить</span>
