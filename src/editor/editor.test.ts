@@ -18,7 +18,9 @@ import { hitTest, idsInRect } from "./hitTest";
 import {
   emptyDocument,
   claimUntaggedArt,
+  duplicateArt,
   keepGeneratedArt,
+  removeArt,
   removeImportedArt,
   replaceArt,
   replaceGenerated,
@@ -83,6 +85,22 @@ describe("document", () => {
     ]);
     const next = replaceArt(doc, "photo-a", [cat({ id: "a2", artId: "photo-a" })]);
     expect(activeConfig(next).categories.map((c) => c.id)).toEqual(["b1", "a2", "tray"]);
+  });
+
+  it("copies one photo's stamps and can drop them again", () => {
+    let doc = emptyDocument();
+    doc = updateActiveCategories(doc, () => [
+      cat({ id: "a1", artId: "photo-a", x: 10, y: 20 }),
+      cat({ id: "b1", artId: "photo-b", x: 40, y: 50 }),
+      cat({ id: "tray", heroIds: [1], width: 200, height: 300, origin: "imported" }),
+    ]);
+    const copied = duplicateArt(doc, "photo-a", "photo-c", 24, 24);
+    const stamps = activeConfig(copied).categories;
+    const copy = stamps.find((c) => c.artId === "photo-c");
+    expect(copy).toMatchObject({ x: 34, y: 44, artId: "photo-c" });
+    expect(stamps.map((c) => c.id)).toEqual(["a1", "b1", "tray", copy?.id]);
+    const removed = removeArt(copied, "photo-a");
+    expect(activeConfig(removed).categories.map((c) => c.id)).toEqual(["b1", "tray", copy?.id]);
   });
 
   it("claims the live photo before another one is added", () => {

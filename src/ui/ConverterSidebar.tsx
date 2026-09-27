@@ -10,6 +10,7 @@ type Props = {
   photos: { id: string; name: string }[];
   activePhotoId: string | null;
   onSelectPhoto: (id: string) => void;
+  onRemovePhoto: (id: string) => void;
   onUpload: (file: File) => void;
   onReplace: (file: File) => void;
   placement: Placement;
@@ -59,18 +60,30 @@ export function ConverterSidebar(props: Props) {
         {props.photos.length > 0 && (
           <div className="photo-list" role="listbox" aria-label="Фото на сетке">
             {props.photos.map((photo, index) => (
-              <button
+              <div
                 key={photo.id}
-                type="button"
+                className={`photo-row${photo.id === props.activePhotoId ? " active" : ""}`}
                 role="option"
                 aria-selected={photo.id === props.activePhotoId}
-                className={photo.id === props.activePhotoId ? "active" : ""}
-                title={photo.name}
-                onClick={() => props.onSelectPhoto(photo.id)}
               >
-                <span className="photo-index">{index + 1}</span>
-                <span className="photo-name">{photo.name}</span>
-              </button>
+                <button
+                  type="button"
+                  className="photo-pick"
+                  title={photo.name}
+                  onClick={() => props.onSelectPhoto(photo.id)}
+                >
+                  <span className="photo-index">{index + 1}</span>
+                  <span className="photo-name">{photo.name}</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn tiny"
+                  title="Удалить фото"
+                  onClick={() => props.onRemovePhoto(photo.id)}
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -83,9 +96,13 @@ export function ConverterSidebar(props: Props) {
             onFile={props.onReplace}
           />
         )}
-        {props.photos.length > 1 && (
-          <p className="hint">Выбранное фото подсвечено. Замена и ползунки меняют только его, остальные картинки остаются.</p>
+        {props.photos.length > 0 && (
+          <p className="hint">
+            Ctrl+C / Ctrl+V копирует выбранное фото рядом, Delete или × удаляет его.
+            {props.photos.length > 1 ? " Замена и ползунки меняют только выбранное." : ""}
+          </p>
         )}
+        <p className="hint">Кнопка «Сетка» вверху включает линии. Фото прилипает к ним, когда его двигаете.</p>
         <Slider
           label="Размер объекта"
           value={placement.scale}

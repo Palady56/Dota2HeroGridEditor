@@ -8,6 +8,51 @@ export type ViewTransform = { scale: number; tx: number; ty: number };
 
 export const IDENTITY_VIEW: ViewTransform = { scale: 1, tx: 0, ty: 0 };
 
+/** Light ruler so trays and photos can share a level. Major lines are labeled. */
+export const GUIDE_MINOR = 50;
+export const GUIDE_MAJOR = 100;
+
+/**
+ * Graph paper in grid coordinates. `pixel` is grid units per screen pixel,
+ * so lines and labels stay about one pixel / 11px on screen at any zoom.
+ */
+export function drawGuideGrid(ctx: CanvasRenderingContext2D, pixel: number): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, GRID_SIZE.width, GRID_SIZE.height);
+  ctx.clip();
+  ctx.setLineDash([]);
+  ctx.lineWidth = pixel;
+  ctx.font = `${Math.max(11 * pixel, 1)}px 'Segoe UI', sans-serif`;
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  for (let x = GUIDE_MINOR; x < GRID_SIZE.width; x += GUIDE_MINOR) {
+    const major = x % GUIDE_MAJOR === 0;
+    ctx.strokeStyle = major ? "rgba(230, 182, 94, 0.5)" : "rgba(236, 231, 221, 0.16)";
+    ctx.beginPath();
+    ctx.moveTo(x + pixel * 0.5, 0);
+    ctx.lineTo(x + pixel * 0.5, GRID_SIZE.height);
+    ctx.stroke();
+    if (major) {
+      ctx.fillStyle = "rgba(230, 182, 94, 0.92)";
+      ctx.fillText(String(x), x + 3 * pixel, 3 * pixel);
+    }
+  }
+  for (let y = GUIDE_MINOR; y < GRID_SIZE.height; y += GUIDE_MINOR) {
+    const major = y % GUIDE_MAJOR === 0;
+    ctx.strokeStyle = major ? "rgba(230, 182, 94, 0.5)" : "rgba(236, 231, 221, 0.16)";
+    ctx.beginPath();
+    ctx.moveTo(0, y + pixel * 0.5);
+    ctx.lineTo(GRID_SIZE.width, y + pixel * 0.5);
+    ctx.stroke();
+    if (major) {
+      ctx.fillStyle = "rgba(230, 182, 94, 0.92)";
+      ctx.fillText(String(y), 3 * pixel, y + 3 * pixel);
+    }
+  }
+  ctx.restore();
+}
+
 const COLORS = {
   background: "#0e1115",
   border: "rgba(226, 84, 58, 0.55)",
@@ -79,11 +124,39 @@ function drawTray(
   ctx.restore();
 }
 
+/** Bright line through the top of the selected object, labeled with its level. */
+export function drawLevelLine(ctx: CanvasRenderingContext2D, y: number, pixel: number, anchorX: number): void {
+  const label = `уровень ${Math.round(y)}`;
+  ctx.save();
+  ctx.strokeStyle = "#ffc857";
+  ctx.lineWidth = 2 * pixel;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(0, y);
+  ctx.lineTo(GRID_SIZE.width, y);
+  ctx.stroke();
+  ctx.font = `700 ${Math.max(13 * pixel, 1)}px 'Segoe UI', sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const padX = 6 * pixel;
+  const textW = ctx.measureText(label).width;
+  const h = 18 * pixel;
+  const w = textW + padX * 2;
+  const bx = Math.min(Math.max(anchorX, 4 * pixel), GRID_SIZE.width - w - 4 * pixel);
+  const by = y - h - 6 * pixel < 4 * pixel ? y + 6 * pixel : y - h - 6 * pixel;
+  ctx.fillStyle = "#ffc857";
+  ctx.fillRect(bx, by, w, h);
+  ctx.fillStyle = "#1a1411";
+  ctx.fillText(label, bx + padX, by + h / 2);
+  ctx.restore();
+}
+
 export function drawGrid(
   ctx: CanvasRenderingContext2D,
   config: GridConfig,
   view: ViewTransform,
   selected: ReadonlySet<string>,
+  guides = true,
 ): void {
   ctx.save();
   ctx.transform(view.scale, 0, 0, view.scale, view.tx, view.ty);
@@ -121,5 +194,6 @@ export function drawGrid(
       ctx.strokeRect(c.x - 1, c.y - 1, GLYPH_HIT.width + 2, GLYPH_HIT.height + 2);
     }
   }
+  if (guides) drawGuideGrid(ctx, 1 / view.scale);
   ctx.restore();
 }

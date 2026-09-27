@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef } from "react";
 import type React from "react";
 import { GRID_SIZE, type GridConfig } from "../model/types";
-import { drawGrid, type ViewTransform } from "../render/drawGrid";
+import { drawGrid, drawLevelLine, type ViewTransform } from "../render/drawGrid";
+import { snapTopLeft } from "../render/guides";
 import { usePortraitVersion } from "../render/portraits";
 import { layerAt, layerFrame, scaleLayer, type Layer } from "../compose/layers";
 import { frameCorners, frameHandle, normalizeDeg, rotationToward, snapDeg, type Vec } from "../model/geometry";
@@ -12,11 +13,22 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onLayerChange: (layer: Layer) => void;
+  guides: boolean;
 };
 
 type Drag =
-  | { kind: "move"; id: string; sx: number; sy: number; x: number; y: number }
+  | { kind: "move"; id: string; sx: number; sy: number; x: number; y: number; left: number; top: number }
   | { kind: "rotate"; id: string };
+
+function frameOrigin(layer: Layer): { x: number; y: number } {
+  const frame = layerFrame(layer);
+  if (!frame) return { x: layer.x, y: layer.y };
+  const corners = frameCorners(frame);
+  return {
+    x: Math.min(...corners.map((c) => c.x)),
+    y: Math.min(...corners.map((c) => c.y)),
+  };
+}
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 const MIN_SCALE = 0.2;
@@ -56,7 +68,7 @@ export function ComposeCanvas(props: Props) {
     const v = view.current;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    drawGrid(ctx, p.preview, v, NO_SELECTION);
+    drawGrid(ctx, p.preview, v, NO_SELECTION, p.guides);
 
     const layer = selectedLayer();
     const f = layer ? layerFrame(layer) : null;
@@ -81,6 +93,10 @@ export function ComposeCanvas(props: Props) {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("⟳", hp.x, hp.y + 1 / v.scale);
+      if (p.guides) {
+        const origin = frameOrigin(layer);
+        drawLevelLine(ctx, origin.y, 1 / v.scale, origin.x);
+      }
       ctx.restore();
     }
   }, []);
@@ -100,7 +116,7 @@ export function ComposeCanvas(props: Props) {
   const portraitVersion = usePortraitVersion();
   useEffect(() => {
     schedule();
-  }, [props.preview, props.layers, props.selectedId, portraitVersion, schedule]);
+  }, [props.preview, props.layers, props.selectedId, props.guides, portraitVersion, schedule]);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -176,7 +192,8 @@ export function ComposeCanvas(props: Props) {
     const layer = p.layers.find((l) => l.id === id);
     if (!layer) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { kind: "move", id: layer.id, sx: g.x, sy: g.y, x: layer.x, y: layer.y };
+    const origin = frameOrigin(layer);
+    drag.current = { kind: "move", id: layer.id, sx: g.x, sy: g.y, x: layer.x, y: layer.y, left: origin.x, top: origin.y };
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -196,10 +213,20 @@ export function ComposeCanvas(props: Props) {
       p.onLayerChange({ ...layer, rotation: e.shiftKey ? snapDeg(deg, 15) : Math.round(deg * 2) / 2 });
       return;
     }
+    let x = d.x + g.x - d.sx;
+    let y = d.y + g.y - d.sy;
+    if (p.guides) {
+      const peers = p.layers
+        .filter((item) => item.id !== layer.id && item.visible)
+        .map((item) => frameOrigin(item));
+      const snapped = snapTopLeft(d.left + g.x - d.sx, d.top + g.y - d.sy, peers, GRID_SIZE);
+      x = d.x + snapped.x - d.left;
+      y = d.y + snapped.y - d.top;
+    }
     p.onLayerChange({
       ...layer,
-      x: Math.round(d.x + g.x - d.sx),
-      y: Math.round(d.y + g.y - d.sy),
+      x: Math.round(x),
+      y: Math.round(y),
     });
   };
 

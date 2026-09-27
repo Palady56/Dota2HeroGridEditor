@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { GRID_SIZE, type GridConfig, type Rect } from "../model/types";
-import { drawGrid, type ViewTransform } from "../render/drawGrid";
+import { GRID_SIZE, inferCategoryKind, type Category, type GridConfig, type Rect } from "../model/types";
+import { drawGrid, drawLevelLine, type ViewTransform } from "../render/drawGrid";
+import { snapTopLeft } from "../render/guides";
 import { GLYPH_ANCHOR, GLYPH_FONT } from "../render/glyph";
 import { usePortraitVersion } from "../render/portraits";
 import { hitTest, idsInRect } from "../editor/hitTest";
@@ -13,7 +14,7 @@ import {
   type Point,
 } from "../editor/operations";
 import { snapTrayRect, trayCells, traySlots, traySize } from "../render/trayLayout";
-import { dragOutline, outlinePoints, shapeStamps, type ShapePoint, type ShapeSettings } from "../editor/shapes";
+import { dragOutline, outlinePoints, selectionBounds, shapeStamps, type ShapePoint, type ShapeSettings } from "../editor/shapes";
 import type { CommitCategories } from "../editor/useDocumentHistory";
 import { IconFit, IconMinus, IconPlus } from "./icons";
 
@@ -33,11 +34,12 @@ type Props = {
   /** Ctrl + wheel: +1 grows, -1 shrinks the current tool (eraser radius, brush, shape step or tray columns). */
   onToolSizeStep: (direction: 1 | -1) => void;
   commitCategories: CommitCategories;
+  guides: boolean;
 };
 
 type Drag =
   | { kind: "pan"; sx: number; sy: number; tx: number; ty: number }
-  | { kind: "move"; start: Point; originals: Map<string, Point>; key: string; moved: boolean }
+  | { kind: "move"; start: Point; originals: Map<string, Point>; bounds: Rect; key: string; moved: boolean }
   | { kind: "box"; start: Point; additive: boolean }
   | { kind: "tray"; start: Point }
   | { kind: "shape"; start: Point }
@@ -47,6 +49,10 @@ type Drag =
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 24;
 const CLICK_PX = 4;
+
+function peerTops(cats: Category[], exclude: { has(id: string): boolean }): { x: number; y: number }[] {
+  return cats.filter((c) => inferCategoryKind(c) === "tray" && !exclude.has(c.id)).map((c) => ({ x: c.x, y: c.y }));
+}
 
 function normRect(a: Point, b: Point): Rect {
   return {
@@ -98,7 +104,7 @@ export function EditorCanvas(props: Props) {
     const v = view.current;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    drawGrid(ctx, p.config, v, p.selected);
+    drawGrid(ctx, p.config, v, p.selected, p.guides);
 
     const o = overlay.current;
     ctx.save();
@@ -151,6 +157,10 @@ export function EditorCanvas(props: Props) {
       ctx.fillText(p.glyph, o.cursor.x - GLYPH_ANCHOR.dx, o.cursor.y - GLYPH_ANCHOR.dy);
       ctx.globalAlpha = 1;
     }
+    if (p.guides) {
+      const bounds = selectionBounds(p.config.categories, p.selected);
+      if (bounds) drawLevelLine(ctx, bounds.y, 1 / v.scale, bounds.x);
+    }
     ctx.restore();
   }, []);
 
@@ -168,7 +178,7 @@ export function EditorCanvas(props: Props) {
 
   useEffect(() => {
     schedule();
-  }, [props.config, props.selected, props.tool, props.glyph, props.eraseRadius, props.paintSpacing, props.shape, props.trayCols, props.heroIconScale, portraitVersion, schedule]);
+  }, [props.config, props.selected, props.tool, props.glyph, props.eraseRadius, props.paintSpacing, props.shape, props.trayCols, props.heroIconScale, props.guides, portraitVersion, schedule]);
 
   const applyView = useCallback(
     (next: ViewTransform) => {
@@ -306,7 +316,8 @@ export function EditorCanvas(props: Props) {
         }
         const originals = new Map<string, Point>();
         for (const c of cats) if (sel.has(c.id)) originals.set(c.id, { x: c.x, y: c.y });
-        drag.current = { kind: "move", start: g, originals, key, moved: false };
+        const bounds = selectionBounds(cats, sel) ?? { x: g.x, y: g.y, width: 0, height: 0 };
+        drag.current = { kind: "move", start: g, originals, bounds, key, moved: false };
         break;
       }
       case "stamp":
@@ -355,19 +366,31 @@ export function EditorCanvas(props: Props) {
           break;
         }
         case "move": {
-          const dx = g.x - d.start.x;
-          const dy = g.y - d.start.y;
+          let dx = g.x - d.start.x;
+          let dy = g.y - d.start.y;
           if (!d.moved && Math.hypot(dx, dy) * view.current.scale < 3) break;
           d.moved = true;
+          if (p.guides) {
+            const snapped = snapTopLeft(d.bounds.x + dx, d.bounds.y + dy, peerTops(p.config.categories, d.originals), GRID_SIZE);
+            dx = snapped.x - d.bounds.x;
+            dy = snapped.y - d.bounds.y;
+          }
           p.commitCategories((cats) => moveCategories(cats, d.originals, dx, dy), d.key);
           break;
         }
         case "box":
           overlay.current.box = normRect(d.start, g);
           break;
-        case "tray":
-          overlay.current.tray = snapTrayFromDrag(d.start, g, p.trayCols);
+        case "tray": {
+          const tray = snapTrayFromDrag(d.start, g, p.trayCols);
+          if (p.guides) {
+            const snapped = snapTopLeft(tray.x, tray.y, peerTops(p.config.categories, new Set()), GRID_SIZE);
+            overlay.current.tray = { ...tray, x: snapped.x, y: snapped.y };
+          } else {
+            overlay.current.tray = tray;
+          }
           break;
+        }
         case "shape":
           overlay.current.shape = shapePreview(d.start, g, e);
           break;

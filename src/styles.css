@@ -780,6 +780,29 @@ input[type="checkbox"]:focus-visible {
   min-height: 32px;
 }
 
+.btn.grid-toggle {
+  min-height: 36px;
+  padding: 0 14px;
+  gap: 8px;
+  font-weight: 700;
+  border-color: var(--gold);
+  color: var(--gold);
+  background: var(--gold-soft);
+}
+
+.btn.grid-toggle.on {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #1a1411;
+  box-shadow: 0 0 0 3px var(--gold-soft);
+}
+
+.btn.grid-toggle.on:hover:not(:disabled) {
+  background: var(--gold);
+  color: #1a1411;
+  filter: brightness(1.05);
+}
+
 .btn.ghost {
   background: transparent;
   border-color: transparent;
@@ -901,11 +924,17 @@ input[type="checkbox"]:focus-visible {
   margin: 0 0 10px;
 }
 
-.photo-list button {
+.photo-row {
+  display: flex;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.photo-list .photo-pick {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  flex: 1;
   min-width: 0;
   padding: 7px 8px;
   border: 1px solid var(--border);
@@ -918,13 +947,13 @@ input[type="checkbox"]:focus-visible {
   font-size: 12px;
 }
 
-.photo-list button.active {
+.photo-row.active .photo-pick {
   border-color: var(--accent);
   background: var(--bg-active);
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.photo-list button:hover {
+.photo-list .photo-pick:hover {
   border-color: var(--accent);
 }
 

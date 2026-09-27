@@ -87,6 +87,7 @@ export function ComposeSidebar(props: Props) {
       </Section>
 
       <Section title="Слои">
+        <p className="hint">Кнопка «Сетка» вверху включает линии. Тащите слой, пока число уровня не совпадёт с другим.</p>
         {props.layers.length === 0 ? (
           <p className="hint">Пока пусто. Нажмите «+» у сетки выше.</p>
         ) : (

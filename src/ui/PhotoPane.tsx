@@ -4,6 +4,8 @@ import { GRID_SIZE, type Placement } from "../model/types";
 import { drawPlaced, hitPlacement, placementFrame, placementRect } from "../image/placement";
 import type { ImageSource } from "../image/source";
 import { frameCorners, frameHandle, normalizeDeg, rotationToward, snapDeg, type Vec } from "../model/geometry";
+import { drawGuideGrid, drawLevelLine } from "../render/drawGrid";
+import { snapTopLeft } from "../render/guides";
 
 export type PlacedPhoto = {
   id: string;
@@ -21,6 +23,7 @@ type Props = {
   onPlacementChange: (placement: Placement) => void;
   mask: Uint8Array | null;
   showMask: boolean;
+  guides: boolean;
 };
 
 const MIN_SCALE = 0.05;
@@ -30,7 +33,7 @@ const HANDLE_RADIUS_PX = 8;
 const HANDLE_INSET_PX = 26;
 
 type Drag =
-  | { kind: "move"; sx: number; sy: number; ox: number; oy: number }
+  | { kind: "move"; sx: number; sy: number; ox: number; oy: number; left: number; top: number }
   | { kind: "rotate" };
 
 function maskToCanvas(mask: Uint8Array): HTMLCanvasElement {
@@ -51,7 +54,7 @@ function maskToCanvas(mask: Uint8Array): HTMLCanvasElement {
   return canvas;
 }
 
-export function PhotoPane({ source, placement, photos, activeId, onSelect, onPlacementChange, mask, showMask }: Props) {
+export function PhotoPane({ source, placement, photos, activeId, onSelect, onPlacementChange, mask, showMask, guides }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef<Drag | null>(null);
   const latest = useRef({ placement, onPlacementChange, photos, activeId, onSelect });
@@ -108,6 +111,7 @@ export function PhotoPane({ source, placement, photos, activeId, onSelect, onPla
       drawPlaced(ctx, source.bitmap, r, placement);
       ctx.globalAlpha = 1;
       if (maskCanvas) ctx.drawImage(maskCanvas, 0, 0);
+      if (guides) drawGuideGrid(ctx, pxScale);
 
       const corners = frameCorners(frame);
       ctx.strokeStyle = "rgba(255, 200, 87, 0.7)";
@@ -131,14 +135,16 @@ export function PhotoPane({ source, placement, photos, activeId, onSelect, onPla
       ctx.fillText("⟳", handle.x, handle.y + pxScale);
       ctx.textAlign = "left";
       ctx.textBaseline = "alphabetic";
+      if (guides) drawLevelLine(ctx, r.y, pxScale, r.x);
     } else {
       ctx.fillStyle = "#6b7480";
       ctx.font = "20px 'Segoe UI', sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("Загрузите изображение слева", canvas.width / 2, canvas.height / 2);
       ctx.textAlign = "left";
+      if (guides) drawGuideGrid(ctx, pxScale);
     }
-  }, [source, placement, photos, activeId, maskCanvas, pxScale]);
+  }, [source, placement, photos, activeId, maskCanvas, pxScale, guides]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -204,7 +210,16 @@ export function PhotoPane({ source, placement, photos, activeId, onSelect, onPla
           setCursor("crosshair");
           return;
         }
-        drag.current = { kind: "move", sx: e.clientX, sy: e.clientY, ox: placement.offsetX, oy: placement.offsetY };
+        const start = placementRect(source.width, source.height, GRID_SIZE, placement);
+        drag.current = {
+          kind: "move",
+          sx: e.clientX,
+          sy: e.clientY,
+          ox: placement.offsetX,
+          oy: placement.offsetY,
+          left: start.x,
+          top: start.y,
+        };
         setCursor("grabbing");
       }}
       onPointerMove={(e) => {
@@ -220,10 +235,20 @@ export function PhotoPane({ source, placement, photos, activeId, onSelect, onPla
           return;
         }
         const k = GRID_SIZE.width / e.currentTarget.getBoundingClientRect().width;
+        let dx = (e.clientX - d.sx) * k;
+        let dy = (e.clientY - d.sy) * k;
+        if (guides && source) {
+          const peers = photos
+            .filter((photo) => photo.id !== activeId && photo.source)
+            .map((photo) => placementRect(photo.source!.width, photo.source!.height, GRID_SIZE, photo.placement));
+          const snapped = snapTopLeft(d.left + dx, d.top + dy, peers, GRID_SIZE);
+          dx = snapped.x - d.left;
+          dy = snapped.y - d.top;
+        }
         onPlacementChange({
           ...placement,
-          offsetX: Math.round(d.ox + (e.clientX - d.sx) * k),
-          offsetY: Math.round(d.oy + (e.clientY - d.sy) * k),
+          offsetX: Math.round(d.ox + dx),
+          offsetY: Math.round(d.oy + dy),
         });
       }}
       onPointerUp={() => {

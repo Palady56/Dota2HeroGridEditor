@@ -105,7 +105,7 @@ function StyleThumb({ categories }: { categories: Category[] | undefined }) {
     fullCanvas.width = GRID_SIZE.width;
     fullCanvas.height = GRID_SIZE.height;
     const full = fullCanvas.getContext("2d")!;
-    drawGrid(full, { id: "preview", name: "", categories }, IDENTITY_VIEW, NO_SELECTION);
+    drawGrid(full, { id: "preview", name: "", categories }, IDENTITY_VIEW, NO_SELECTION, false);
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(THUMB_WIDTH * dpr);
     canvas.height = Math.round(THUMB_HEIGHT * dpr);

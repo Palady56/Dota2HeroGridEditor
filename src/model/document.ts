@@ -1,11 +1,20 @@
 import { createId } from "./ids";
 import {
   DOTA_JSON_VERSION,
+  GRID_SIZE,
   inferCategoryKind,
   type Category,
   type GridConfig,
   type GridDocument,
 } from "./types";
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return n < min ? min : n > max ? max : n;
+}
 
 export function emptyDocument(configName = "Custom"): GridDocument {
   const config: GridConfig = { id: createId("cfg"), name: configName, categories: [] };
@@ -48,6 +57,31 @@ export function replaceArt(doc: GridDocument, artId: string, stamps: Category[])
     const trays = kept.filter((c) => inferCategoryKind(c) === "tray");
     const rest = kept.filter((c) => inferCategoryKind(c) !== "tray");
     return [...rest, ...stamps, ...trays];
+  });
+}
+
+/** Copy one photo's stamps to a new id, shifted so a pasted picture does not sit on the original. */
+export function duplicateArt(doc: GridDocument, fromId: string, toId: string, dx: number, dy: number): GridDocument {
+  return updateActiveCategories(doc, (cats) => {
+    const copies = cats
+      .filter((c) => c.artId === fromId)
+      .map((c) => ({
+        ...c,
+        id: createId("cat"),
+        artId: toId,
+        x: round2(clamp(c.x + dx, 0, GRID_SIZE.width - 1)),
+        y: round2(clamp(c.y + dy, 0, GRID_SIZE.height - 1)),
+        heroIds: [...c.heroIds],
+      }));
+    return copies.length === 0 ? cats : [...cats, ...copies];
+  });
+}
+
+/** Drop the stamps that belong to one photo. Trays and other photos stay. */
+export function removeArt(doc: GridDocument, artId: string): GridDocument {
+  return updateActiveCategories(doc, (cats) => {
+    const next = cats.filter((c) => c.artId !== artId);
+    return next.length === cats.length ? cats : next;
   });
 }
 

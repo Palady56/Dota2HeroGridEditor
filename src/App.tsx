@@ -10,6 +10,8 @@ import {
   mergeConfigInto,
   removeActiveConfig,
   claimUntaggedArt,
+  duplicateArt,
+  removeArt,
   renameActiveConfig,
   replaceArt,
   setActiveConfig,
@@ -112,6 +114,24 @@ function isTyping(target: EventTarget | null): boolean {
 export function App() {
   const [restored] = useState(loadSession);
   const [theme, toggleTheme] = useTheme();
+  const [guides, setGuides] = useState(() => {
+    try {
+      return localStorage.getItem("dota-hero-grid-art:guides") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const toggleGuides = () => {
+    setGuides((on) => {
+      const next = !on;
+      try {
+        localStorage.setItem("dota-hero-grid-art:guides", next ? "1" : "0");
+      } catch {
+        // The choice just won't be remembered.
+      }
+      return next;
+    });
+  };
   const { doc, canUndo, canRedo, commit, commitCategories, undo, redo } = useDocumentHistory(restored?.doc);
   const config = activeConfig(doc);
 
@@ -167,6 +187,7 @@ export function App() {
   const requestArt = useRef(new Map<number, string>());
   const clipboard = useRef<Category[]>([]);
   const pasteCount = useRef(0);
+  const photoClip = useRef<{ id: string; n: number } | null>(null);
 
   useEffect(() => {
     const client = createConversionClient((out, id) => {
@@ -231,6 +252,47 @@ export function App() {
     setConversion(null);
     setStatus(photo.source ? `Выбрано фото ${photo.name}` : `Выбрано «${photo.name}». Замените его новым файлом или оставьте как есть.`);
   };
+
+  const removePhoto = useCallback(
+    (id: string) => {
+      const index = photos.findIndex((photo) => photo.id === id);
+      if (index < 0) return;
+      const next = photos.filter((photo) => photo.id !== id);
+      const fallback = next[Math.min(index, next.length - 1)] ?? null;
+      setPhotos(next);
+      if (activePhotoId === id) {
+        setActivePhotoId(fallback?.id ?? null);
+        setSource(fallback?.source ?? null);
+        setPlacement(fallback?.placement ?? DEFAULT_PLACEMENT);
+        setConversion(null);
+      }
+      if (photoClip.current?.id === id) photoClip.current = null;
+      commit((d) => removeArt(d, id));
+      setStatus("Фото удалено");
+    },
+    [photos, activePhotoId, commit],
+  );
+
+  const pastePhoto = useCallback(
+    (sourceId: string, shift: number) => {
+      const photo = photos.find((item) => item.id === sourceId);
+      if (!photo) return;
+      const id = createId("art");
+      const nextPlacement = {
+        ...photo.placement,
+        offsetX: photo.placement.offsetX + shift,
+        offsetY: photo.placement.offsetY + shift,
+      };
+      commit((d) => duplicateArt(d, photo.id, id, shift, shift));
+      setPhotos((list) => [...list, { id, source: photo.source, name: photo.name, placement: nextPlacement }]);
+      setActivePhotoId(id);
+      setSource(photo.source);
+      setPlacement(nextPlacement);
+      setConversion(null);
+      setStatus(`Фото «${photo.name}» вставлено`);
+    },
+    [photos, commit],
+  );
 
   const onUpload = async (file: File, mode: "add" | "replace" = "add") => {
     try {
@@ -481,6 +543,29 @@ export function App() {
         }
         return;
       }
+      if (tab === "convert") {
+        if (mod && e.code === "KeyC") {
+          if (!activePhotoId) return;
+          e.preventDefault();
+          photoClip.current = { id: activePhotoId, n: 0 };
+          const name = photos.find((photo) => photo.id === activePhotoId)?.name ?? "фото";
+          setStatus(`Фото «${name}» скопировано`);
+          return;
+        }
+        if (mod && e.code === "KeyV") {
+          const clip = photoClip.current;
+          if (!clip || !photos.some((photo) => photo.id === clip.id)) return;
+          e.preventDefault();
+          clip.n += 1;
+          pastePhoto(clip.id, PASTE_OFFSET * clip.n);
+          return;
+        }
+        if ((e.code === "Delete" || e.code === "Backspace") && activePhotoId) {
+          e.preventDefault();
+          removePhoto(activePhotoId);
+        }
+        return;
+      }
       if (tab !== "edit") return;
       if (mod && e.code === "KeyA") {
         e.preventDefault();
@@ -529,7 +614,22 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tab, config.categories, selected, commitCategories, undo, redo, layers, layerId, onLayerChange, onRemoveLayer]);
+  }, [
+    tab,
+    config.categories,
+    selected,
+    commitCategories,
+    undo,
+    redo,
+    layers,
+    layerId,
+    onLayerChange,
+    onRemoveLayer,
+    photos,
+    activePhotoId,
+    pastePhoto,
+    removePhoto,
+  ]);
 
   const onFrameSelection = (padding: number) => {
     const bounds = selectionBounds(config.categories, selected);
@@ -579,6 +679,8 @@ export function App() {
         onRemoveConfig={() => switchConfig(removeActiveConfig)}
         theme={theme}
         onToggleTheme={toggleTheme}
+        guides={guides}
+        onToggleGuides={toggleGuides}
       />
 
       <aside className="sidebar">
@@ -602,6 +704,7 @@ export function App() {
             photos={photos.map((photo) => ({ id: photo.id, name: photo.name }))}
             activePhotoId={activePhotoId}
             onSelectPhoto={selectPhoto}
+            onRemovePhoto={removePhoto}
             onUpload={(file) => onUpload(file, "add")}
             onReplace={(file) => onUpload(file, "replace")}
             placement={placement}
@@ -673,13 +776,14 @@ export function App() {
                 onPlacementChange={onPlacement}
                 mask={conversion?.mask ?? null}
                 showMask={showMask}
+                guides={guides}
               />
             </section>
             <section className="pane">
               <header>
                 Превью из символов · {GRID_SIZE.width}×{GRID_SIZE.height}
               </header>
-              <GridPreviewPane config={config} />
+              <GridPreviewPane config={config} guides={guides} />
             </section>
           </div>
         ) : tab === "compose" ? (
@@ -689,6 +793,7 @@ export function App() {
             selectedId={layerId}
             onSelect={setLayerId}
             onLayerChange={onLayerChange}
+            guides={guides}
           />
         ) : (
           <EditorCanvas
@@ -709,6 +814,7 @@ export function App() {
               else setEraseRadius((r) => clamp(r + dir * (r >= 20 ? 2 : 1), ERASE_RADIUS_RANGE));
             }}
             commitCategories={commitCategories}
+            guides={guides}
           />
         )}
       </main>

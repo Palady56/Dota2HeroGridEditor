@@ -10,6 +10,7 @@ import {
   IconFilePlus,
   IconFolder,
   IconImage,
+  IconGrid,
   IconLayers,
   IconMoon,
   IconPencil,
@@ -41,6 +42,8 @@ type Props = {
   onRemoveConfig: () => void;
   theme: Theme;
   onToggleTheme: () => void;
+  guides: boolean;
+  onToggleGuides: () => void;
 };
 
 const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
@@ -76,6 +79,21 @@ export function Toolbar(props: Props) {
           </button>
         ))}
       </nav>
+
+      <button
+        type="button"
+        className={`btn grid-toggle${props.guides ? " on" : ""}`}
+        aria-pressed={props.guides}
+        onClick={props.onToggleGuides}
+        title={
+          props.guides
+            ? "Сетка включена. Жёлтая линия — верх выбранного блока, число на ней — его уровень. Тащите другой блок, пока число не станет таким же: он прилипнет к линии. Нажмите, чтобы выключить."
+            : "Включить сетку: линии каждые 50, уровень выбранного блока и прилипание при перетаскивании."
+        }
+      >
+        <IconGrid />
+        <span>{props.guides ? "Сетка вкл" : "Сетка выкл"}</span>
+      </button>
 
       <div className="toolbar-group">
         <button type="button" className="btn icon" disabled={!props.canUndo} onClick={props.onUndo} title="Отменить (Ctrl+Z)">

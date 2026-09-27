@@ -5,7 +5,7 @@ import { usePortraitVersion } from "../render/portraits";
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
-export function GridPreviewPane({ config }: { config: GridConfig }) {
+export function GridPreviewPane({ config, guides }: { config: GridConfig; guides: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const portraitVersion = usePortraitVersion();
 
@@ -13,9 +13,9 @@ export function GridPreviewPane({ config }: { config: GridConfig }) {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const frame = requestAnimationFrame(() => drawGrid(ctx, config, IDENTITY_VIEW, NO_SELECTION));
+    const frame = requestAnimationFrame(() => drawGrid(ctx, config, IDENTITY_VIEW, NO_SELECTION, guides));
     return () => cancelAnimationFrame(frame);
-  }, [config, portraitVersion]);
+  }, [config, portraitVersion, guides]);
 
   return (
     <canvas
